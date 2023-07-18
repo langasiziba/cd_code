@@ -13,6 +13,7 @@ from PyQt6.QtCore import (QObject, pyqtSignal, pyqtSlot)
 
 
 class Ui_MainWindow(QObject):
+    setpmtClicked = pyqtSignal()
     initializeClicked = pyqtSignal()
     closeClicked = pyqtSignal()
     gainClicked = pyqtSignal()
@@ -495,6 +496,7 @@ class Ui_MainWindow(QObject):
         self.repetitions_input.setValidator(validator0)
         self.samplec_input.setValidator(validator2)
         self.path_input.setValidator(validator2)
+        self.pmt_input.setValidator(validator1)
 
         """Example code:
         from PyQt5 import QtCore, QtWidgets
@@ -572,7 +574,7 @@ if __name__ == '__main__':
         self.save_comments.clicked.connect(self.on_save_comments_clicked)
         self.save_notes.clicked.connect(self.on_save_notes_clicked)
         self.set_path.clicked.connect(self.on_path_clicked)
-        self.set_pmt
+        self.set_pmt.clicked.connect(self.on_pmt_clicked)
 
     @pyqtSlot()
     def on_initialize_clicked(self):
@@ -677,6 +679,12 @@ if __name__ == '__main__':
         path_text = self.path_input.text()
         path_value = float(path_text) if path_text else 0.0
         self.pathClicked.emit(path_value)
+
+    @pyqtSlot()
+    def on_pmt_clicked(self):
+        pmt_text = self.pmt_input.text()
+        pmt_value = float(pmt_text) if pmt_text else 0.0
+        self.pathClicked.emit(pmt_value)
     # setupUi
 
     def retranslateUi(self, MainWindow):
