@@ -1,7 +1,6 @@
 """The following code is specifically designed to control the PEM. The PEM will circularly polarize the light"""
 
-
-from debug import VisaDevice
+from debug import VisaDevice, LogObject
 from debug import ECommError
 import pyvisa
 import re
@@ -9,10 +8,12 @@ import math
 import scipy.special
 import queue
 
-class PEM(VisaDevice):
+
+class PEM(VisaDevice, LogObject):
     # A class to control a Hinds PEM controller 200 V01 device
 
-    def init_pem(self, name='ASRL3::INSTR', model='Hinds PEM controller 200 V01', log_name='PEM', retardation=0.25):
+    def __init__(self, name='ASRL3::INSTR', model='Hinds PEM controller 200 V01', log_name='PEM', retardation=0.25):
+        super().__init__()
         self.name = name
         self.model = model
         self.log_name = log_name
@@ -34,12 +35,15 @@ class PEM(VisaDevice):
             self.inst.baud_rate = 250000
             self.inst.timeout = 600  # setting timeout
             if self.check_response():
+                self.log("Initialization successful!")
+                self.initialized = True
                 self.log("Test successful!")
                 self.log("Retardation = {}.".format(self.retardation))
                 self.log("Bessel correction factor = {:.4f}.".format(self.bessel_corr))
                 self.initialized = True  # The initialized flag should be accessed with self
                 return True
             else:
+                self.log("Fail to initialize.", error=True)  # Emit a log signal for initialization failure
                 self.log("Test failed. Try reconnecting PEM.")
                 return False
         except Exception as e:
@@ -126,7 +130,7 @@ class PEM(VisaDevice):
         amp_string = self.retry_query(q=':MOD:AMP?', grp='AMP')
         return self.extract_value(amp_string)
 
-    def set_amp(self, f:float) -> str:
+    def set_amp(self, f: float) -> str:
         query = ':MOD:AMP {:.2f}'.format(f)
         return self.retry_query(q=query, grp='AMP', isset=True, value=f, isfloat=True)
 
@@ -146,15 +150,15 @@ class PEM(VisaDevice):
         drive_string = self.retry_query(q=':MOD:DRV?', grp='DRIVE')
         return self.extract_value(drive_string)
 
-    def set_drive(self, f:float) -> str:
+    def set_drive(self, f: float) -> str:
         query = ':MOD:DRV {:.2f}'.format(f)
         return self.retry_query(q=query, grp='DRIVE', isset=True, value=f, isfloat=True)
 
     # Sets wavelength and returns current wavelength value
-    def set_nm(self, nm:float) -> str:
+    def set_nm(self, nm: float) -> str:
         return self.extract_value(self.set_amp(nm * self.retardation))
 
-    def get_nm(self, nm:float):
+    def get_nm(self, nm: float):
         return float(self.get_amp()) / self.retardation
 
     # get the current and the phase error (0-1 scale)
@@ -171,5 +175,3 @@ class PEM(VisaDevice):
 
     def get_voltage_info(self) -> str:
         return self.retry_query(q=':SYS:VC?', grp='VC')
-
-

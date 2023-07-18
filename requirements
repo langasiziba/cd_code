@@ -1,0 +1,14 @@
+# Standard Library
+math
+re
+queue
+datetime
+time
+
+# External Libraries
+numpy
+scipy
+zhinst
+pyvisa
+PySide6
+PyQt6

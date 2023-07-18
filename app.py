@@ -1,17 +1,42 @@
 from PySide6.QtCore import (QCoreApplication, QDate, QDateTime, QLocale,
                             QMetaObject, QObject, QPoint, QRect,
                             QSize, QTime, QUrl, Qt)
-from PySide6.QtGui import (QBrush, QColor, QConicalGradient, QCursor,
+from PySide6.QtGui import (QBrush, QColor, QConicalGradient, QCursor, QPen, QColor,
                            QFont, QFontDatabase, QGradient, QIcon,
                            QImage, QKeySequence, QLinearGradient, QPainter,
-                           QPalette, QPixmap, QRadialGradient, QTransform)
+                           QPalette, QPixmap, QRadialGradient, QTransform, QDoubleValidator)
 from PySide6.QtWidgets import (QApplication, QGraphicsView, QGroupBox, QLabel,
                                QLineEdit, QMainWindow, QPlainTextEdit, QProgressBar,
-                               QPushButton, QSizePolicy, QStatusBar, QWidget)
+                               QPushButton, QSizePolicy, QStatusBar, QWidget,  QGraphicsScene)
 from PyQt6.QtCore import (QObject, pyqtSignal, pyqtSlot)
 
 
-class Ui_MainWindow(object):
+
+class Ui_MainWindow(QObject):
+    initializeClicked = pyqtSignal()
+    closeClicked = pyqtSignal()
+    gainClicked = pyqtSignal()
+    offsetClicked = pyqtSignal()
+    rangeClicked = pyqtSignal()
+    stepsizeClicked = pyqtSignal()
+    wlmaxClicked = pyqtSignal()
+    dwelltimeClicked = pyqtSignal()
+    wlminClicked = pyqtSignal()
+    filenameClicked = pyqtSignal()
+    detcorrectionsClicked = pyqtSignal()
+    acClicked = pyqtSignal()
+    repetitionsClicked = pyqtSignal()
+    samplecClicked = pyqtSignal()
+    dcClicked = pyqtSignal()
+    startbuttonClicked = pyqtSignal()
+    stopbuttonClicked = pyqtSignal()
+    savecommentsClicked = pyqtSignal()
+    pathClicked = pyqtSignal()
+    savenotesClicked = pyqtSignal()
+
+    def __init__(self):
+        super().__init__()
+
     def setupUi(self, MainWindow):
         if not MainWindow.objectName():
             MainWindow.setObjectName(u"MainWindow")
@@ -372,7 +397,7 @@ class Ui_MainWindow(object):
         self.progressBar.setObjectName(u"progressBar")
         self.progressBar.setGeometry(QRect(50, 670, 251, 23))
         self.progressBar.setFont(font5)
-        self.progressBar.setValue(24)
+        self.progressBar.setValue(60)
         self.label_33 = QLabel(self.spectrasetup_group)
         self.label_33.setObjectName(u"label_33")
         self.label_33.setGeometry(QRect(240, 580, 49, 16))
@@ -450,6 +475,27 @@ class Ui_MainWindow(object):
         self.retranslateUi(MainWindow)
         QMetaObject.connectSlotsByName(MainWindow)
 
+ # Create a validator to accept only floating-point values
+        validator0 = QDoubleValidator()
+        validator0.setDecimals(0)
+
+        validator1 = QDoubleValidator()
+        validator0.setDecimals(1)
+
+        validator2 = QDoubleValidator()
+        validator0.setDecimals(2)
+
+        self.wl_min.setValidator(validator2)
+        self.wl_max.setValidator(validator2)
+        self.dwelltime_input.setValidator(validator1)
+        self.stepsize_input.setValidator(validator0)
+        self.gain_input.setValidator(validator2)
+        self.offset_input.setValidator(validator2)
+        self.range_input.setValidator(validator2)
+        self.repetitions_input.setValidator(validator0)
+        self.samplec_input.setValidator(validator2)
+        self.path_input.setValidator(validator2)
+
         """Example code:
         from PyQt5 import QtCore, QtWidgets
 
@@ -504,29 +550,133 @@ if __name__ == '__main__':
     # Start the event loop
     sys.exit(app.exec())"""
 
-        # Instantiate the button handler and connect signals
-        self.buttonHandler = ButtonHandler()
 
         # connect the actual button clicking
-        self.initialize_button.clicked.connect(self.buttonHandler.on_initialize_clicked)
-        self.close_button.clicked.connect(self.buttonHandler.on_close_clicked)
-        self.set_gain.clicked.connect(self.buttonHandler.on_gain_clicked)
-        self.set_offset.clicked.connect(self.buttonHandler.on_offset_clicked)
-        self.set_range.clicked.connect(self.buttonHandler.on_range_clicked)
-        self.set_stepsize.clicked.connect(self.buttonHandler.on_step_size_clicked)
-        self.set_wl_max.clicked.connect(self.buttonHandler.on_wl_max_clicked)
-        self.set_dwelltime.clicked.connect(self.buttonHandler.on_dwell_time_clicked)
-        self.set_wlmin.clicked.connect(self.buttonHandler.on_wl_min_clicked)
-        self.set_filename.clicked.connect(self.buttonHandler.on_file_name_clicked)
-        self.set_detcorrections.clicked.connect(self.buttonHandler.on_det_corrections_clicked)
-        self.set_ac.clicked.connect(self.buttonHandler.on_ac_clicked)
-        self.set_repetitions.clicked.connect(self.buttonHandler.on_repetitions_clicked)
-        self.set_samplec.clicked.connect(self.buttonHandler.on_sample_c_clicked)
-        self.set_dc.clicked.connect(self.buttonHandler.on_dc_clicked)
-        self.start_button.clicked.connect(self.buttonHandler.on_start_button_clicked)
-        self.stop_button.clicked.connect(self.buttonHandler.on_stop_button_clicked)
-        self.save_comments.clicked.connect(self.buttonHandler.on_save_comments_clicked)
-        self.set_path.clicked.connect(self.buttonHandler.on_path_clicked)
+        self.initialize_button.clicked.connect(self.on_initialize_clicked)
+        self.close_button.clicked.connect(self.on_close_clicked)
+        self.set_gain.clicked.connect(self.on_gain_clicked)
+        self.set_offset.clicked.connect(self.on_offset_clicked)
+        self.set_range.clicked.connect(self.on_range_clicked)
+        self.set_stepsize.clicked.connect(self.on_step_size_clicked)
+        self.set_wl_max.clicked.connect(self.on_wl_max_clicked)
+        self.set_dwelltime.clicked.connect(self.on_dwell_time_clicked)
+        self.set_wlmin.clicked.connect(self.on_wl_min_clicked)
+        self.set_filename.clicked.connect(self.on_file_name_clicked)
+        self.set_detcorrections.clicked.connect(self.on_det_corrections_clicked)
+        self.set_ac.clicked.connect(self.on_ac_clicked)
+        self.set_repetitions.clicked.connect(self.on_repetitions_clicked)
+        self.set_samplec.clicked.connect(self.on_sample_c_clicked)
+        self.set_dc.clicked.connect(self.on_dc_clicked)
+        self.start_button.clicked.connect(self.on_start_button_clicked)
+        self.stop_button.clicked.connect(self.on_stop_button_clicked)
+        self.save_comments.clicked.connect(self.on_save_comments_clicked)
+        self.save_notes.clicked.connect(self.on_save_notes_clicked)
+        self.set_path.clicked.connect(self.on_path_clicked)
+        self.set_pmt
+
+    @pyqtSlot()
+    def on_initialize_clicked(self):
+        self.initializeClicked.emit()
+
+    @pyqtSlot()
+    def on_close_clicked(self):
+        self.closeClicked.emit()
+
+    @pyqtSlot()
+    def on_gain_clicked(self):
+        gain_text = self.gain_input.text()
+        gain_value = float(gain_text) if gain_text else 0.0
+        self.gainClicked.emit(gain_value)
+
+
+    @pyqtSlot()
+    def on_offset_clicked(self):
+        offset_text = self.offset_input.text()
+        offset_value = float(offset_text) if offset_text else 0.0
+        self.offsetClicked.emit(offset_value)
+
+    @pyqtSlot()
+    def on_range_clicked(self):
+        range_text = self.range_input.text()
+        range_value = float(range_text) if range_text else 0.0
+        self.rangeClicked.emit(range_value)
+
+    @pyqtSlot()
+    def on_step_size_clicked(self):
+        stepsize_text = self.stepsize_input.text()
+        stepsize_value = float(stepsize_text) if stepsize_text else 0.0
+        self.stepsizeClicked.emit(stepsize_value)
+
+    @pyqtSlot()
+    def on_wl_max_clicked(self):
+        wlmax_text = self.wl_max.text()
+        wlmax_value = float(wlmax_text) if wlmax_text else 0.0
+        self.wlmaxClicked.emit(wlmax_value)
+
+    @pyqtSlot()
+    def on_dwell_time_clicked(self):
+        dwelltime_text = self.dwelltime_input.text()
+        dwelltime_value = float(dwelltime_text) if dwelltime_text else 0.0
+        self.dwelltimeClicked(dwelltime_value)
+
+    @pyqtSlot()
+    def on_wl_min_clicked(self):
+        wlmin_text = self.wl_min.text()
+        wlmin_value = float(wlmin_text) if wlmin_text else 0.0
+        self.wlminClicked(wlmin_value)
+
+    @pyqtSlot()
+    def on_file_name_clicked(self):
+        self.filenameClicked.emit()
+
+    @pyqtSlot()
+    def on_det_corrections_clicked(self):
+        self.detcorrectionsClicked.emit()
+
+    @pyqtSlot()
+    def on_ac_clicked(self):
+        self.acClicked.emit()
+
+    @pyqtSlot()
+    def on_repetitions_clicked(self):
+        repet_text = self.repetitions_input.text()
+        repet_value = float(repet_text) if repet_text else 0.0
+        self.repetitionsClicked.emit(repet_value)
+
+    @pyqtSlot()
+    def on_sample_c_clicked(self):
+        samplec_text = self.samplec_input.text()
+        samplec_value = float(samplec_text) if samplec_text else 0.0
+        self.samplecClicked.emit(samplec_value)
+
+    @pyqtSlot()
+    def on_dc_clicked(self):
+        self.dcClicked.emit()
+
+    @pyqtSlot()
+    def on_start_button_clicked(self):
+        self.startbuttonClicked.emit()
+
+    @pyqtSlot()
+    def on_stop_button_clicked(self):
+        self.stopbuttonClicked.emit()
+
+    @pyqtSlot()
+    def on_save_comments_clicked(self):
+        comments_text = self.comments_input.text()
+        comments_value = str(comments_text) if comments_text else "no comments"
+        self.savecommentsClicked.emit(comments_value)
+
+    def on_save_notes_clicked(self):
+        notes_text = self.notes_input.text()
+        notes_value = str(notes_text) if notes_text else ("")
+        self.savenotesClicked.emit(notes_value)
+
+    @pyqtSlot()
+    def on_path_clicked(self):
+        path_text = self.path_input.text()
+        path_value = float(path_text) if path_text else 0.0
+        self.pathClicked.emit(path_value)
     # setupUi
 
     def retranslateUi(self, MainWindow):
@@ -593,108 +743,12 @@ if __name__ == '__main__':
         self.label_31.setText(QCoreApplication.translate("MainWindow", u"g_abs", None))
         self.label_32.setText(QCoreApplication.translate("MainWindow", u"CD", None))
         self.debug_group.setTitle(QCoreApplication.translate("MainWindow", u"Debug log", None))
-        self.debug_input.setPlainText(QCoreApplication.translate("MainWindow", u"Debug goes here", None))
+        self.debug_input.setPlainText(QCoreApplication.translate("MainWindow", u"", None))
     # retranslateUi
 
 # define the clicked button instances
 
 
-class ButtonHandler(QObject):
-    initializeClicked = pyqtSignal()
-    closeClicked = pyqtSignal()
-    gainClicked = pyqtSignal()
-    offsetClicked = pyqtSignal()
-    rangeClicked = pyqtSignal()
-    stepsizeClicked = pyqtSignal()
-    wlmaxClicked = pyqtSignal()
-    dwelltimeClicked = pyqtSignal()
-    wlminClicked = pyqtSignal()
-    filenameClicked = pyqtSignal()
-    detcorrectionsClicked = pyqtSignal()
-    acClicked = pyqtSignal()
-    repetitionsClicked = pyqtSignal()
-    samplecClicked = pyqtSignal()
-    dcClicked = pyqtSignal()
-    startbuttonClicked = pyqtSignal()
-    stopbuttonClicked = pyqtSignal()
-    savecommentsClicked = pyqtSignal()
-    pathClicked = pyqtSignal()
 
-    def __init__(self):
-        super().__init__()
 
-    @pyqtSlot()
-    def on_initialize_clicked(self):
-        self.initializeClicked.emit()
 
-    @pyqtSlot()
-    def on_close_clicked(self):
-        self.initializeClicked.emit()
-
-    @pyqtSlot()
-    def on_gain_clicked(self):
-        self.gainClicked.emit()
-
-    @pyqtSlot()
-    def on_offset_clicked(self):
-        self.offsetClicked.emit()
-
-    @pyqtSlot()
-    def on_range_clicked(self):
-        self.rangeClicked.emit()
-
-    @pyqtSlot()
-    def on_step_size_clicked(self):
-        self.stepsizeClicked.emit()
-
-    @pyqtSlot()
-    def on_wl_max_clicked(self):
-        self.wlmaxClicked.emit()
-
-    @pyqtSlot()
-    def on_dwell_time_clicked(self):
-        self.dwelltimeClicked.emit()
-
-    @pyqtSlot()
-    def on_wl_min_clicked(self):
-        self.wlminClicked.emit()
-
-    @pyqtSlot()
-    def on_file_name_clicked(self):
-        self.filenameClicked.emit()
-
-    @pyqtSlot()
-    def on_det_corrections_clicked(self):
-        self.detcorrectionsClicked.emit()
-
-    @pyqtSlot()
-    def on_ac_clicked(self):
-        self.acClicked.emit()
-
-    @pyqtSlot()
-    def on_repetitions_clicked(self):
-        self.repetitionsClicked.emit()
-
-    @pyqtSlot()
-    def on_sample_c_clicked(self):
-        self.samplecClicked.emit()
-
-    @pyqtSlot()
-    def on_dc_clicked(self):
-        self.dcClicked.emit()
-
-    @pyqtSlot()
-    def on_start_button_clicked(self):
-        self.startbuttonClicked.emit()
-
-    @pyqtSlot()
-    def on_stop_button_clicked(self):
-        self.stopbuttonClicked.emit()
-
-    @pyqtSlot()
-    def on_save_comments_clicked(self):
-        self.savecommentsClicked.emit()
-
-    @pyqtSlot()
-    def on_path_clicked(self):
-        self.pathClicked.emit()
