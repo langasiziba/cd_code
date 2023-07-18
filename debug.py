@@ -6,7 +6,6 @@ from PyQt6.QtCore import QObject, pyqtSignal
 from PyQt6.QtWidgets import QMessageBox
 
 
-
 class ECommError(Exception):
     pass
 
@@ -14,6 +13,7 @@ class ECommError(Exception):
 """This part of the code controls is the error log. Through the following program we are able to display an error
 log using a central box and in the debug log that displays the error in the format [Error type][Date, Time][Error] This class 
 will also be used to control error handling for the devices in the system"""
+
 
 class LogObject(QObject):
     log_signal = pyqtSignal(str)
@@ -23,6 +23,7 @@ class LogObject(QObject):
         self.log_name = log_name
         self.initialized = False
         self.log_queue = Queue()
+        self.error_emitted = False
 
     def log(self, s: str, error: bool = False, no_id: bool = False):
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -30,14 +31,19 @@ class LogObject(QObject):
         if not no_id:
             ss = '[{}] {}'.format(self.log_name, ss)
 
-        self.log_signal.emit(ss)
-
         if error or 'error' in ss.lower():
-            self.show_error_box(ss)
             self.log_queue.put(ss)
+            if not no_id:
+                self.show_error_box(ss)
+            if not self.error_emitted:
+                self.log_signal.emit(ss)
+                self.error_emitted = True
+        elif not self.log_queue.full():
+            self.log_queue.put(ss)
+            self.log_signal.emit(ss)
+            self.error_emitted = False
 
-        elif not self.log_queue.empty():
-            self.log_queue.put(ss)
+    # Rest of the class implementation...
 
     def log_ask(self, q: str):
         self.log('<< {}'.format(q))
@@ -60,8 +66,6 @@ class LogObject(QObject):
 
 
 class VisaDevice(LogObject):
-    log_signal = pyqtSignal(str)
-
     def log_query(self, q: str) -> str:
         self.log_ask(q)
         s = self.inst.query(q)
@@ -84,4 +88,3 @@ class VisaDevice(LogObject):
         self.inst.close()
         self.log('Connection closed.')
         self.initialized = False
-

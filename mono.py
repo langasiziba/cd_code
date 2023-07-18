@@ -114,7 +114,7 @@ class Monoii(VisaDevice):
     # Edit these for different model
     name = 'ASRL4::INSTR'
     model = 'SP-2-150i'
-    serial = '21551955'
+    serial = '21551956'
     ok = 'ok'
     log_name = 'MONII'
 

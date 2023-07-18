@@ -10,32 +10,41 @@ import numpy as np
 import statistics
 import zhinst.utils
 import zhinst.core
+from debug import LogObject
+import queue
+from typing import Tuple
+import time
+
 
 
 # Controls the Zurich Instruments MFLI lock-in amplifier
-class MFLI:
-    def __init__(self, devID: str):
-        self.devID = devID  # ID of the device which is dev7024
+class MFLI(LogObject):
+    sampling_rate = 104.6  # s-1 data transfer rate
+    time_const = 0.00811410938  # s, time constant of the low-pass filter of the lock-in amplifier
+    filter_order = 3
+    pmt_low_limit = 0.0  # V, low limit of control voltage for PMT
+    pmt_high_limit = 1.1  # V, high limit of control voltage for PMT
+    pmt_volt = 0.0  # V, control voltage of the PMT
+    signal_range = 3.0  # V, default signal range
+    dwell_time = 0.5  # s, default acquisition time per point
+    dwell_time_scaling = 1
+    data_set_size = int(np.ceil(dwell_time * sampling_rate))  # number of data points per acquisition
+    dc_phaseoffset = 0.0  # degrees, results in DC phase at +90 or -90 degrees
+    phaseoffset = 158.056  # degrees
+    rel_lp_phaseoffset = -22  # degrees
+    bessel_corr = 0.0  # correction factor for the sin(A sin(x)) modulation of the PEM, will be obtained from PEM
+    bessel_corr_lp = 0.0  # correction factor for linear component, will be obtained from PEM
+    ac_theta_avg = 0.0
+    ac_theta_count = 0
+    sqrt2 = np.sqrt(2)
+    daq = None
+
+    def __init__(self, ID:str, logname:str, log_queue:queue.Queue):
+        self.devID = ID  # ID of the device which is dev7024
         self.devPath = '/' + self.devID + '/'
-        self.sampling_rate = 104.6  # s-1 data transfer rate
-        self.time_const = 0.00811410938  # s, time constant of the low-pass filter of the lock-in amplifier
-        self.filter_order = 3
-        self.pmt_low_limit = 0.0  # V, low limit of control voltage for PMT
-        self.pmt_high_limit = 1.1  # V, high limit of control voltage for PMT
-        self.pmt_volt = 0.0  # V, control voltage of the PMT
-        self.signal_range = 3.0  # V, default signal range
-        self.dwell_time = 0.5  # s, default acquisition time per point
-        self.dwell_time_scaling = 1
-        self.data_set_size = int(np.ceil(self.dwell_time * self.sampling_rate))  # number of data points per acquisition
-        self.dc_phaseoffset = 0.0  # degrees, results in DC phase at +90 or -90 degrees
-        self.phaseoffset = 158.056  # degrees
-        self.rel_lp_phaseoffset = -22  # degrees
-        self.bessel_corr = 0.0  # correction factor for the sin(A sin(x)) modulation of the PEM, will be obtained from PEM
-        self.bessel_corr_lp = 0.0  # correction factor for linear component, will be obtained from PEM
-        self.ac_theta_avg = 0.0
-        self.ac_theta_count = 0
-        self.sqrt2 = np.sqrt(2)
-        self.daq = None
+        self.log_name = logname
+        self.log_queue = log_queue
+
 
     def connect(self) -> bool:
         try:
@@ -339,6 +348,26 @@ class MFLI:
         if error:
             return {'success': False,
                     'data': np.zeros(6)}
+
+    def get_pmt_spectra(self) -> Tuple[np.ndarray, np.ndarray]:
+        self.setup_device(pmt=True, ch1=False, ch2=False, ch3=False, ch4=False, daqm=True, scp=False)
+
+        # Configure the PMT settings and acquire the spectra data
+        self.set_PMT_voltage(1.0)  # Set the PMT control voltage
+
+        # Wait for settling time or perform any necessary initialization steps
+        time.sleep(10)  # Wait for 10 seconds
+
+        # Acquire the spectra data
+        spectra_data = self.read_data()
+
+        # Extract the relevant PMT spectra from the acquired data
+        pmt_spectra = spectra_data['data'][2]  # Assuming the PMT spectra is at index 2
+
+        # Optionally, you can also retrieve the x-axis values for the PMT spectra
+        x_values = np.arange(len(pmt_spectra))  # Generate x-axis values based on the data length
+
+        return x_values, pmt_spectra
 
     def read_ac_theta(self, ext_abort_flag: list) -> float:
         path = self.devPath + 'demods/0/sample'

@@ -1,6 +1,6 @@
 """The following code is specifically designed to control the PEM. The PEM will circularly polarize the light"""
 
-from debug import VisaDevice, LogObject
+from debug import VisaDevice
 from debug import ECommError
 import pyvisa
 import re
@@ -9,7 +9,7 @@ import scipy.special
 import queue
 
 
-class PEM(VisaDevice, LogObject):
+class PEM(VisaDevice):
     # A class to control a Hinds PEM controller 200 V01 device
 
     def __init__(self, name='ASRL3::INSTR', model='Hinds PEM controller 200 V01', log_name='PEM', retardation=0.25):
@@ -36,18 +36,17 @@ class PEM(VisaDevice, LogObject):
             self.inst.timeout = 600  # setting timeout
             if self.check_response():
                 self.log("Initialization successful!")
-                self.initialized = True
                 self.log("Test successful!")
                 self.log("Retardation = {}.".format(self.retardation))
                 self.log("Bessel correction factor = {:.4f}.".format(self.bessel_corr))
                 self.initialized = True  # The initialized flag should be accessed with self
                 return True
             else:
-                self.log("Fail to initialize.", error=True)  # Emit a log signal for initialization failure
-                self.log("Test failed. Try reconnecting PEM.")
+                super().log("Fail to initialize.", error=True)  # Emit a log signal for initialization failure
+                super().log("Test failed. Try reconnecting PEM.")
                 return False
         except Exception as e:
-            self.log("Error connecting to: " + self.name + ". " + str(e), True)
+            self.log("Error connecting to: " + self.name + ". " + str(e), error=True, no_id=False)
             return False
 
     def extract_value(self, s: str) -> str:

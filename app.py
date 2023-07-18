@@ -9,6 +9,8 @@ from PySide6.QtWidgets import (QApplication, QGraphicsView, QGroupBox, QLabel,
                                QLineEdit, QMainWindow, QPlainTextEdit, QProgressBar,
                                QPushButton, QSizePolicy, QStatusBar, QWidget,  QGraphicsScene)
 from PyQt6.QtCore import (QObject, pyqtSignal, pyqtSlot)
+from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
+import matplotlib.pyplot as plt
 
 
 
@@ -110,10 +112,10 @@ class Ui_MainWindow(QObject):
         self.signaltuning_group.setFont(font1)
         self.signaltuning_group.setAutoFillBackground(False)
         self.signaltuning_group.setStyleSheet(u"background-color: rgb(195, 195, 255)")
-        self.graphicsView = QGraphicsView(self.signaltuning_group)
-        self.graphicsView.setObjectName(u"graphicsView")
-        self.graphicsView.setGeometry(QRect(20, 30, 271, 151))
-        self.graphicsView.setStyleSheet(u"background-color: rgb(255, 255, 255)")
+        self.pmt_spectra_view = QGraphicsView(self.signaltuning_group)
+        self.pmt_spectra_view.setObjectName(u"pmt_spectra_view")
+        self.pmt_spectra_view.setGeometry(QRect(20, 30, 271, 151))
+        self.pmt_spectra_view.setStyleSheet(u"background-color: rgb(255, 255, 255)")
         self.label_9 = QLabel(self.signaltuning_group)
         self.label_9.setObjectName(u"label_9")
         self.label_9.setGeometry(QRect(10, 200, 81, 16))
@@ -209,7 +211,7 @@ class Ui_MainWindow(QObject):
         self.notes_input.setGeometry(QRect(100, 410, 191, 61))
         self.notes_input.setFont(font2)
         self.notes_input.setStyleSheet(u"background-color: rgb(255, 255, 255)")
-        self.graphicsView.raise_()
+        self.pmt_spectra_view.raise_()
         self.label_9.raise_()
         self.label_10.raise_()
         self.label_11.raise_()
