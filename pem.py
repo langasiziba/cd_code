@@ -33,7 +33,7 @@ class PEM(VisaDevice):
             self.inst.write_termination = ';'
             self.inst.read_termination = '\n'
             self.inst.baud_rate = 250000
-            self.inst.timeout = 600  # setting timeout
+            self.inst.timeout = 3000  # setting timeout
             if self.check_response():
                 self.log("Initialization successful!")
                 self.log("Test successful!")
