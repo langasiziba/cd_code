@@ -2,8 +2,8 @@ from queue import Queue  # Import the Queue class from the queue module
 from datetime import datetime  # Import the datetime class from the datetime module
 import time
 import pyvisa
-from PyQt6.QtCore import QObject, pyqtSignal
-from PyQt6.QtWidgets import QMessageBox
+from PyQt5.QtCore import QObject, pyqtSignal
+from PyQt5.QtWidgets import QMessageBox
 
 
 class ECommError(Exception):

@@ -1,16 +1,17 @@
-from PySide6.QtCore import (QCoreApplication, QDate, QDateTime, QLocale,
+from PyQt5.QtCore import (QCoreApplication, QDate, QDateTime, QLocale,
                             QMetaObject, QObject, QPoint, QRect,
-                            QSize, QTime, QUrl, Qt)
-from PySide6.QtGui import (QBrush, QColor, QConicalGradient, QCursor, QPen, QColor,
+                            QSize, QTime, QUrl, Qt, pyqtSignal, pyqtSlot)
+from PyQt5.QtGui import (QBrush, QColor, QConicalGradient, QCursor, QPen,
                            QFont, QFontDatabase, QGradient, QIcon,
                            QImage, QKeySequence, QLinearGradient, QPainter,
                            QPalette, QPixmap, QRadialGradient, QTransform, QDoubleValidator)
-from PySide6.QtWidgets import (QApplication, QGraphicsView, QGroupBox, QLabel,
+from PyQt5.QtWidgets import (QApplication, QGraphicsView, QGroupBox, QLabel,
                                QLineEdit, QMainWindow, QPlainTextEdit, QProgressBar,
-                               QPushButton, QSizePolicy, QStatusBar, QWidget,  QGraphicsScene)
-from PyQt6.QtCore import (QObject, pyqtSignal, pyqtSlot)
+                               QPushButton, QSizePolicy, QStatusBar, QWidget, QGraphicsScene, QVBoxLayout)
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
-import matplotlib.pyplot as plt
+from matplotlib.figure import Figure
+import queue
+from mfli import MFLI
 
 
 
@@ -39,13 +40,15 @@ class Ui_MainWindow(QObject):
 
     def __init__(self):
         super().__init__()
+        log_queue = queue.Queue()
+        self.mfli = MFLI(ID="dev7024", logname="mfli_log", log_queue=log_queue)
 
     def setupUi(self, MainWindow):
         if not MainWindow.objectName():
             MainWindow.setObjectName(u"MainWindow")
-        MainWindow.resize(1365, 768)
+        MainWindow.resize(1920, 1080)
         font = QFont()
-        font.setFamilies([u"Segoe UI Historic"])
+        font.setFamily("Segoe UI Historic")  # Change to this for PyQt5
         MainWindow.setFont(font)
         MainWindow.setAutoFillBackground(True)
         MainWindow.setStyleSheet(u"background color: rgb(230, 230, 230)")
@@ -112,10 +115,27 @@ class Ui_MainWindow(QObject):
         self.signaltuning_group.setFont(font1)
         self.signaltuning_group.setAutoFillBackground(False)
         self.signaltuning_group.setStyleSheet(u"background-color: rgb(195, 195, 255)")
-        self.pmt_spectra_view = QGraphicsView(self.signaltuning_group)
+
+        # pmt spectra
+        # Create a Figure for your plot
+        # Initialize the FigureCanvas
+        self.fig = Figure(figsize=(5, 4), dpi=100)
+        self.ax = self.fig.add_subplot(111)
+        # Create a new FigureCanvas
+        self.canvas = FigureCanvas(self.fig)
+        self.pmt_spectra_view = QWidget(self.signaltuning_group)
         self.pmt_spectra_view.setObjectName(u"pmt_spectra_view")
-        self.pmt_spectra_view.setGeometry(QRect(20, 30, 271, 151))
-        self.pmt_spectra_view.setStyleSheet(u"background-color: rgb(255, 255, 255)")
+        self.pmt_spectra_view.setGeometry(20, 30, 271, 151)
+        self.pmt_spectra_view.setStyleSheet(u"background-color: rgb(255,255,255)")
+
+        canvas_layout = QVBoxLayout()
+        canvas_layout.addWidget(self.canvas)
+        self.pmt_spectra_view.setLayout(canvas_layout)
+
+        layout = QVBoxLayout()
+        layout.addWidget(self.pmt_spectra_view)
+        self.signaltuning_group.setLayout(layout)
+
         self.label_9 = QLabel(self.signaltuning_group)
         self.label_9.setObjectName(u"label_9")
         self.label_9.setGeometry(QRect(10, 200, 81, 16))
@@ -555,6 +575,7 @@ if __name__ == '__main__':
     sys.exit(app.exec())"""
 
 
+
         # connect the actual button clicking
         self.initialize_button.clicked.connect(self.on_initialize_clicked)
         self.close_button.clicked.connect(self.on_close_clicked)
@@ -577,6 +598,12 @@ if __name__ == '__main__':
         self.save_notes.clicked.connect(self.on_save_notes_clicked)
         self.set_path.clicked.connect(self.on_path_clicked)
         self.set_pmt.clicked.connect(self.on_pmt_clicked)
+
+    @pyqtSlot(dict)
+    def update_plot(self, data):
+        self.ax.clear()  # clear the previous plot
+        self.ax.plot(data['CD'], data['dc'])
+        self.pmt_spectra_view.draw()  # refresh the FigureCanvas
 
     @pyqtSlot()
     def on_initialize_clicked(self):
@@ -651,7 +678,7 @@ if __name__ == '__main__':
     def on_sample_c_clicked(self):
         samplec_text = self.samplec_input.text()
         samplec_value = float(samplec_text) if samplec_text else 0.0
-        self.samplecClicked.emit(samplec_value)
+        self.mfli.set_samplec(samplec_value)
 
     @pyqtSlot()
     def on_dc_clicked(self):
