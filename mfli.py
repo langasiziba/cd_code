@@ -3,7 +3,7 @@ output from the PEM controller into the reference input of the MFLI. Then, in th
 programming interface, you would set up a demodulator to use this reference signal for phase-sensitive detection.
 This allows the MFLI to measure the amplitude and phase of the signal from the photomultiplier tube (PMT) at the
 modulation frequency of the PEM."""
-from PyQt5.QtCore import pyqtSlot, pyqtSignal, QObject
+from PyQt5.QtCore import pyqtSlot, pyqtSignal
 from debug import LogObject
 import zhinst.core
 import zhinst.utils

@@ -1,14 +1,14 @@
-import pyvisa
-from PyQt5.QtWidgets import QApplication, QMainWindow, QGraphicsView, QVBoxLayout, QLabel, QWidget
-from PyQt5.QtCore import Qt
-from app import Ui_MainWindow
-from debug import LogObject
-from pem import PEM
-from mono import Monoi, Monoii
-from mfli import MFLI
 import queue
-import matplotlib.pyplot as plt
-from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
+
+import pyvisa
+from PyQt5.QtCore import Qt
+from PyQt5.QtWidgets import QApplication, QMainWindow
+
+from debug import LogObject
+from gui import Ui_MainWindow
+from mfli import MFLI
+from mono import Monoi, Monoii
+from pem import PEM
 
 
 class MainWindow(QMainWindow):
