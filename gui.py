@@ -8,6 +8,8 @@ from PyQt5.QtWidgets import (QGraphicsView, QGroupBox, QLabel,
                              QPushButton, QSizePolicy, QStatusBar, QWidget, QVBoxLayout)
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
+from PyQt5.QtWidgets import QApplication, QMainWindow, QPushButton
+from controller import Controller, PhaseOffsetCalibrationDialog
 
 from mfli import MFLI
 
@@ -39,6 +41,8 @@ class Ui_MainWindow(QObject):
         super().__init__()
         log_queue = queue.Queue()
         self.mfli = MFLI(ID="dev7024", logname="mfli_log", log_queue=log_queue)
+        self.controller = Controller()
+        self.PhaseOffsetCalibrationDialog = PhaseOffsetCalibrationDialog(self.controller)
 
     def setupUi(self, MainWindow):
         if not MainWindow.objectName():
@@ -509,7 +513,6 @@ class Ui_MainWindow(QObject):
         self.initialize_button.clicked.connect(lambda checked=False: self.on_initialize_clicked())
         self.close_button.clicked.connect(lambda checked=False: self.on_close_clicked)
         self.set_gain.clicked.connect(lambda checked=False: self.on_gain_clicked)
-        self.set_offset.clicked.connect(lambda checked=False: self.on_offset_clicked)
         self.set_range.clicked.connect(lambda checked=False: self.on_range_clicked)
         self.set_stepsize.clicked.connect(lambda checked=False: self.on_step_size_clicked)
         self.set_wl_max.clicked.connect(lambda checked=False: self.on_wl_max_clicked)
@@ -527,6 +530,12 @@ class Ui_MainWindow(QObject):
         self.save_notes.clicked.connect(lambda checked=False: self.on_save_notes_clicked)
         self.set_path.clicked.connect(lambda checked=False: self.on_path_clicked)
         self.set_pmt.clicked.connect(lambda checked=False: self.on_pmt_clicked)
+        self.set_offset.clicked.connect(lambda checked=False: self.controller.open_cal_dialog)
+
+    @pyqtSlot()
+    def open_cal_dialog(self):
+        self.cal_dialog = self.PhaseOffsetCalibrationDialog(self.controller)
+        self.cal_dialog.show()
 
     @pyqtSlot(dict)
     def update_plot(self, data):

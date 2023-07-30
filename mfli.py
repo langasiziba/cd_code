@@ -17,9 +17,7 @@ from IPython.core.interactiveshell import InteractiveShell
 
 InteractiveShell.ast_node_interactivity = "all"
 
-
 class MFLI(LogObject):
-    pmt_data_updated = pyqtSignal(dict)
     sampling_rate = 104.6  # s-1 data transfer rate
     time_const = 0.00811410938  # s, time constant of the low-pass filter of the lock-in amplifier
     filter_order = 3
@@ -51,17 +49,11 @@ class MFLI(LogObject):
     sqrt2 = np.sqrt(2)
 
     def __init__(self, ID: str, logname: str, log_queue: queue.Queue):
-        super().__init__()
+        self.scope = None
         self.devID = ID  # ID of the device, for example dev3902
         self.devPath = '/' + self.devID + '/'
         self.log_name = logname
         self.log_queue = log_queue
-        self.samplec = 0.0
-
-    @pyqtSlot(float)
-    def set_samplec(self, samplec):
-        self.samplec = samplec
-
 
     def connect(self) -> bool:
         try:
@@ -74,8 +66,7 @@ class MFLI(LogObject):
                                                self.props['apilevel'])
             self.daq.connectDevice(self.devID, self.props['connected'])
 
-            # Issue a warning and return False if the release version of the API used in the session (daq) does not
-            # have the same release version as the Data Server (that the API is connected to).
+            # Issue a warning and return False if the release version of the API used in the session (daq) does not have the same release version as the Data Server (that the API is connected to).
             zhinst.utils.utils.api_server_version_check(self.daq)
             return True
         except Exception as e:
@@ -127,24 +118,16 @@ class MFLI(LogObject):
                 self.daq.setInt(self.devPath + 'demods/0/enable', 1)
 
             if ch2:
-                self.log('Channel 2...')
-                # Channel 2 (ExtRef)
+                self.log('Channel 2 (External reference from PEM)...')
                 self.daq.setInt(self.devPath + 'extrefs/0/enable', 1)
 
             if ch3:
                 self.log('Channel 3...')
                 # Channel 3 (DC, 0 Hz)
-                self.daq.setInt(self.devPath + 'demods/1/adcselect', 0)
                 self.daq.setDouble(self.devPath + 'oscs/0/freq', 0)
-                self.daq.setDouble(self.devPath + 'demods/1/phaseshift', self.dc_phaseoffset)
-                self.daq.setInt(self.devPath + 'demods/1/order', self.filter_order)
-                self.daq.setDouble(self.devPath + 'demods/1/timeconstant', self.time_const)
-                self.daq.setDouble(self.devPath + 'demods/1/rate', self.sampling_rate)
-                self.daq.setInt(self.devPath + 'demods/1/enable', 1)
 
             if daqm:
-                self.node_paths = [self.devPath + 'demods/0/sample',
-                                   self.devPath + 'demods/1/sample']
+                self.node_paths = [self.devPath + 'demods/0/sample']
                 self.bessel_corr = bessel
                 self.bessel_corr_lp = bessel_lp
 
@@ -232,8 +215,9 @@ class MFLI(LogObject):
 
     def read_scope(self):
         data = self.scope.read(True)
-        avg_volt = 0.0
+
         max_volt = 0.0
+        avg_volt = 0.0
         if self.devPath + 'scopes/0/wave' in data:
             if 'wave' in data[self.devPath + 'scopes/0/wave'][0][0]:
                 for chunk in data[self.devPath + 'scopes/0/wave'][0][0]['wave']:
@@ -262,7 +246,7 @@ class MFLI(LogObject):
             i = 0  # off
         self.daq.setInt(self.devPath + 'extrefs/' + str(osc_index) + '/enable', i)
 
-    # reads demodulator data from MFLI and returns calculated data etc.
+    # reads demodulator data from MFLI and returns calculated gabs etc.
     # This function is run in a separate thread, that can be aborted by ext_abort_flag[0]
     # provided by Controller instance
     def read_data(self, ext_abort_flag: list) -> dict:
@@ -287,15 +271,12 @@ class MFLI(LogObject):
             for path in paths:
                 self.daq.getAsEvent(path)
 
-        # collects data chunks from MFLI using the low-level poll() command and aligns the channels according to
-        # their timestamps
+        # collects data chunks from MFLI using the low-level poll() command and aligns the channels according to their timestamps
         def poll_data(paths) -> np.array:
-            global last_overlap
             poll_time_step = min(0.1, self.dwell_time * 1.3)
 
-            # initialize array for raw data
-            raw_xy = [[[], [], []], [[], [], []], [[], [], []]]  # array_x = sample (0, 2, 3), array_y = timestep, x, y
-            filtered_xy = [[[], []], [[], []], [[], []]]  # array_x = sample, array_y = x, y
+            raw_xy = [[[], [], []]]  # array_y = timestep, x, y
+            filtered_xy = [[[], []]]  # array_x = sample, array_y = x, y
 
             data_count = 0
             data_per_step = poll_time_step * self.sampling_rate
@@ -312,14 +293,12 @@ class MFLI(LogObject):
 
                 if is_data_complete(data_chunk, self.node_paths):
                     # add new data to raw_xy
-                    for j in range(0, 3):
-                        raw_xy[j][0].extend(data_chunk[self.node_paths[j]]['timestamp'])
-                        raw_xy[j][1].extend(data_chunk[self.node_paths[j]]['x'])
-                        raw_xy[j][2].extend(data_chunk[self.node_paths[j]]['y'])
+                    raw_xy[0][0].extend(data_chunk[self.node_paths[0]]['timestamp'])
+                    raw_xy[0][1].extend(data_chunk[self.node_paths[0]]['x'])
+                    raw_xy[0][2].extend(data_chunk[self.node_paths[0]]['y'])
 
                 # find overlap of timestamps between the three samples
-                last_overlap = np.intersect1d(np.intersect1d(np.array(raw_xy[0][0]), np.array(raw_xy[1][0])),
-                                              np.array(raw_xy[2][0]))
+                last_overlap = np.array(raw_xy[0])
                 data_count = last_overlap.size
 
                 # if only a few values are missing, reduce the poll time accordingly
@@ -330,17 +309,15 @@ class MFLI(LogObject):
             # Stop data buffering
             self.daq.unsubscribe('*')
 
-            # identify the timestamps that are identical in all three samples, reduce number of data points to
-            # data_set_size (to avoid different numbers of data points at different wavelengths)
+            # identify the timestamps that are identical in all three samples, reduce number of data points to data_set_size (to avoid different numbers of data points at different wavelenghts)
             overlap_timestamps = np_array_tail(last_overlap, int(self.data_set_size))
 
-            # filter the x and y data according to overlapping timestamps
-            for k in range(0, 3):
-                # create a list of bools that marks whether a timestamp is in a sample data set or not
-                overlap_bools = np.isin(np.array(raw_xy[k][0]), overlap_timestamps)
-                # save the filtered x and y data in filtered_xy
-                filtered_xy[k][0] = np.array(raw_xy[k][1])[overlap_bools]
-                filtered_xy[k][1] = np.array(raw_xy[k][2])[overlap_bools]
+            # filter the x and y data
+            # create a list of bools that marks whether a timestamp is in a sample data set or not
+            overlap_bools = np.isin(np.array(raw_xy[0][0]), overlap_timestamps)
+            # save the filtered x and y data in filtered_xy
+            filtered_xy[0][0] = np.array(raw_xy[0][1])[overlap_bools]
+            filtered_xy[0][1] = np.array(raw_xy[0][2])[overlap_bools]
 
             return np.array(filtered_xy)
 
@@ -384,7 +361,7 @@ class MFLI(LogObject):
         self.log('Starting data aquisition. ({} s)'.format(self.dwell_time))
         error = False
 
-        # Format raw_data: array_x: AC, DC, array_y: x, y
+        # Format raw_data: array_x: AC, DC, LP, array_y: x, y
         raw_data = poll_data(self.node_paths)
         no_data = len(raw_data[0][0]) == 0
 
@@ -398,61 +375,64 @@ class MFLI(LogObject):
                 ac_raw = get_r(raw_data[0])
                 ac_theta = get_theta(raw_data[0])
 
-                dc_raw = get_r(raw_data[1])
-                dc_theta = get_theta(raw_data[1])
-
                 sgn = np.vectorize(get_sign)
 
                 # apply sign, correct raw values (Vrms->Vpk) and Bessel correction for AC
                 ac = np.multiply(ac_raw, sgn(ac_theta)) * self.sqrt2 * self.bessel_corr
-                # sign and lock-in amplifier correction
-                dc = np.multiply(dc_raw, sgn(dc_theta)) / self.sqrt2
 
-                # Calculate glum=AC/DC
+                average_value = np.mean(ac_raw)
+                dc = average_value
+
+                # print out the average
+                print("The DC value or average value is ", average_value)
+
+                # Calculate CD=AC/DC
                 CD = np.divide(ac, dc)
                 # Calc I_L=(AC+DC)
                 I_L = np.add(ac, dc)
                 # Calc I_R=(DC-AC)
-                I_R = np.subtract(dc, ac)
+                I_R = np.subtract(dc , ac)
                 # Calculation of gabs
-                g_abs = float((I_L - I_R)/ (I_R + I_L))
-                # Calculation of ellipticity
-                theta = self.samplec
-                theta_std = self.samplec
+                # Element-wise calculations
+                I_L_minus_I_R = np.subtract(I_L, I_R)
+                I_R_plus_I_L = np.add(I_R, I_L)
+                # Element-wise division
+                g_abs = np.divide(I_L_minus_I_R, I_R_plus_I_L)
+                # calculation of molar ellipticity
+                molar_ellip = np.multiply(dc, dc)
+                ellip = np.multiply(dc, dc)
 
 
-                # The error of the values is calculates as the standard deviation in the data set that is collected
-                # for one wavelength
+                # The error of the values is calculates as the standard deviation in the data set that is collected for one wavelength
                 if ac.shape[0] > 0:
                     return {'success': True,
                             'data': [
-                                np.average(CD),
-                                np.std(CD),
                                 np.average(dc),
                                 np.std(dc),
-                                np.average(ac),
-                                np.std(ac),
+                                np.average(CD),
+                                np.std(CD),
                                 np.average(I_L),
                                 np.std(I_L),
                                 np.average(I_R),
                                 np.std(I_R),
                                 np.average(g_abs),
                                 np.std(g_abs),
-                                np.average(theta),
-                                np.std(theta),
-                                np.average(theta_std),
-                                np.std(theta_std)]
-                            }
+                                np.average(ac_theta),
+                                np.std(ac_theta),
+                                np.average(molar_ellip),
+                                np.std(molar_ellip),
+                                np.average(ellip),
+                                np.std(ellip)]}
                 else:
                     error = True
                     self.log(
-                        'Error during calculation of corrected values and g_abs! Returning zeros. Printing raw data.',
+                        'Error during calculation of corrected values and gabs! Returning zeros. Printing raw data.',
                         True)
                     print(raw_data)
             else:
                 error = True
                 self.log(
-                    'Error: All NaN in at least one of the channels (AC, DC)! Returning zeros. Printing raw data.',
+                    'Error: All NaN in at least one of the channels (AC, DC, Theta, LP or LP theta)! Returning zeros. Printing raw data.',
                     True)
                 print(raw_data)
         else:
@@ -462,7 +442,7 @@ class MFLI(LogObject):
             return {'success': False,
                     'data': np.zeros(14)}
 
-    # reads the phase of CD, returns the average value
+    # reads the phase of CPL, returns the average value
     def read_ac_theta(self, ext_abort_flag: list) -> float:
         path = self.devPath + 'demods/0/sample'
         theta = []
@@ -471,7 +451,7 @@ class MFLI(LogObject):
 
         self.log('Recording AC theta...')
 
-        # This function uses poll instead of read for performance reasons. Also, no temporal alignment of the data is required
+        # This function uses poll instead of read for performance reasons. Also no temporal alignment of the data is required
         self.daq.subscribe(path)
         self.daq.sync()
 
@@ -490,16 +470,4 @@ class MFLI(LogObject):
         self.log('Stop recording AC theta...')
         ext_abort_flag[0] = False
         return self.ac_theta_avg
-
-    def get_pmt_data(self):
-        # get your data from MFLI
-        data = {
-            'CD': np.random.random(10),  # replace with your actual data
-            'dc': np.random.random(10),  # replace with your actual data
-        }
-
-        # emit a signal to inform the GUI about the new data
-        self.pmt_data_updated.emit(data)
-
-        return data
 

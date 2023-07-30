@@ -1,14 +1,20 @@
 import queue
 
 import pyvisa
-from PyQt5.QtCore import Qt
-from PyQt5.QtWidgets import QApplication, QMainWindow
+from PyQt5.QtCore import Qt, QTimer, QThread
+from PyQt5.QtWidgets import QApplication, QMainWindow, QDialog, QVBoxLayout, QLabel, QPushButton
+import time
 
 from debug import LogObject
 from gui import Ui_MainWindow
 from mfli import MFLI
-from mono import Monoi, Monoii
+
 from pem import PEM
+
+import sys
+import time
+from PyQt5.QtWidgets import QApplication, QMainWindow, QVBoxLayout, QDialog, QLabel, QPushButton
+from PyQt5.QtCore import QTimer, Qt
 
 
 class MainWindow(QMainWindow):

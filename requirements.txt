@@ -1,12 +1,12 @@
 # External Libraries
-numpy
-scipy
-zhinst
-pyvisa
-PySide6
-PyQt6
-matplotlib
-pyqtgraph
+numpy~=1.24.3
+scipy~=1.10.1
+zhinst~=23.2.4
+pyvisa~=1.13.0
+matplotlib~=3.7.1
 
 # Make sure to download correct NI VISA library for your device from:
 # https://www.ni.com/en-us/support/downloads/drivers/download.ni-visa.html#480875
+
+PyQt5~=5.15.9
+ipython~=8.14.0
