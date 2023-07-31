@@ -419,6 +419,9 @@ class Controller(QMainWindow):
         self.gui.progressBar.time_left = time_left
         self.gui.progressBar.unit = unit
 
+    def update_osc_plots(self, max_vals):
+        self.gui.plot_osc(data_max=max_vals, max_len=self.max_volt_hist_length, time_step=self.osc_refresh_delay)
+
     def open_cal_dialog(self):
         self.cal_dialog = PhaseOffsetCalibrationDialog(self)
         self.cal_dialog.show()

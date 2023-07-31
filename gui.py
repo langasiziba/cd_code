@@ -1,7 +1,7 @@
 import queue
 
 from PyQt5.QtCore import (QCoreApplication, QMetaObject, QRect,
-                          Qt, pyqtSignal, pyqtSlot, QObject)
+                          Qt, pyqtSignal, pyqtSlot, QObject, QTimer)
 from PyQt5.QtGui import (QCursor, QFont, QDoubleValidator)
 from PyQt5.QtWidgets import (QGraphicsView, QGroupBox, QLabel,
                              QLineEdit, QPlainTextEdit, QProgressBar,
@@ -505,6 +505,18 @@ class Ui_MainWindow(QObject):
         edt = self.input_mapping[var]
         edt.setStyleSheet("background-color: white")  # reset to white
 
+    def plot_osc(self, data_max, max_len, time_step):
+        self.pmt_spectra_view.ax.clear()  # Clear previous plot
+
+        # Ensure data_max is of length max_len
+        if len(data_max) > max_len:
+            data_max = data_max[-max_len:]  # Trim to max_len if too long
+        elif len(data_max) < max_len:
+            data_max = [0] * (max_len - len(data_max)) + data_max  # Pad with zeros if too short
+
+        self.pmt_spectra_view.ax.plot(data_max)  # Plot new data
+        self.pmt_spectra_view.canvas.draw()  # Update the canvas to show the new plot
+        QTimer.singleShot(time_step, self.plot_osc)  # Call the method again after time_step milliseconds
 
     @pyqtSlot()
     def on_initialize_button_clicked(self):
@@ -575,11 +587,6 @@ class Ui_MainWindow(QObject):
         self.cal_dialog = self.PhaseOffsetCalibrationDialog(self.controller)
         self.cal_dialog.show()
 
-    @pyqtSlot(dict)
-    def update_plot(self, data):
-        self.ax.clear()  # clear the previous plot
-        self.ax.plot(data['CD'], data['dc'])
-        self.pmt_spectra_view.draw()  # refresh the FigureCanvas
 
     def setup_matplotlib_widget(self, parent, geometry, name):
         widget = QWidget(parent)
