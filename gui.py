@@ -5,7 +5,7 @@ from PyQt5.QtCore import (QCoreApplication, QMetaObject, QRect,
 from PyQt5.QtGui import (QCursor, QFont, QDoubleValidator)
 from PyQt5.QtWidgets import (QGraphicsView, QGroupBox, QLabel,
                              QLineEdit, QPlainTextEdit, QProgressBar,
-                             QPushButton, QSizePolicy, QStatusBar, QWidget, QVBoxLayout)
+                             QPushButton, QSizePolicy, QStatusBar, QWidget, QVBoxLayout, QComboBox)
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
 from PyQt5.QtWidgets import QApplication, QMainWindow, QPushButton
@@ -13,6 +13,14 @@ from controller import Controller, PhaseOffsetCalibrationDialog
 
 from mfli import MFLI
 
+class MyProgressBar(QProgressBar):
+    def __init__(self, parent=None):
+        super(MyProgressBar, self).__init__(parent)
+        self.time_left = 0
+        self.unit = 's'
+
+    def text(self):
+        return f'ca. {self.time_left:.1f} {self.unit}'
 
 class Ui_MainWindow(QObject):
     setpmtClicked = pyqtSignal()
@@ -25,6 +33,8 @@ class Ui_MainWindow(QObject):
     stopbuttonClicked = pyqtSignal()
     savecommentsClicked = pyqtSignal()
     setwavelengthClicked = pyqtSignal()
+    rangeChosen = pyqtSignal()
+    calibrateClicked = pyqtSignal
 
     def __init__(self):
         super().__init__()
@@ -219,10 +229,15 @@ class Ui_MainWindow(QObject):
         self.pmt_input.setObjectName(u"pmt_input")
         self.pmt_input.setGeometry(QRect(110, 290, 113, 21))
         self.pmt_input.setStyleSheet(u"background-color: rgb(255, 255, 255)")
-        self.range_input = QLineEdit(self.signaltuning_group)
+        self.range_input = QComboBox(self.signaltuning_group)
         self.range_input.setObjectName(u"range_input")
         self.range_input.setGeometry(QRect(110, 410, 113, 21))
-        self.range_input.setStyleSheet(u"background-color: rgb(255, 255, 255)")
+        # add items to the combo box
+        self.range_input.addItem("0.001")
+        self.range_input.addItem("0.003")
+        self.range_input.addItem("1.0")
+        self.range_input.addItem("1.0")
+
         self.gain_input = QLineEdit(self.signaltuning_group)
         self.gain_input.setObjectName(u"gain_input")
         self.gain_input.setGeometry(QRect(110, 330, 113, 21))
@@ -387,11 +402,11 @@ class Ui_MainWindow(QObject):
         self.save_comments.setGeometry(QRect(140, 600, 51, 21))
         self.save_comments.setFont(font2)
         self.save_comments.setStyleSheet(u"background-color: rgb(255, 255, 255)")
-        self.progressBar = QProgressBar(self.spectrasetup_group)
+        self.progressBar = MyProgressBar(self.spectrasetup_group)
         self.progressBar.setObjectName(u"progressBar")
         self.progressBar.setGeometry(QRect(80, 780, 251, 23))
         self.progressBar.setFont(font5)
-        self.progressBar.setValue(24)
+        self.progressBar.setValue(0)
         self.label_33 = QLabel(self.spectrasetup_group)
         self.label_33.setObjectName(u"label_33")
         self.label_33.setGeometry(QRect(140, 640, 71, 16))
@@ -416,22 +431,11 @@ class Ui_MainWindow(QObject):
         self.spectra_group.setAutoFillBackground(False)
         self.spectra_group.setStyleSheet(u"background-color: rgb(195, 255, 255)")
         self.spectra_group.setEnabled(False)
-        self.graphicsView_2 = QGraphicsView(self.spectra_group)
-        self.graphicsView_2.setObjectName(u"graphicsView_2")
-        self.graphicsView_2.setGeometry(QRect(20, 60, 321, 201))
-        self.graphicsView_2.setStyleSheet(u"background-color: rgb(255,255,255)")
-        self.graphicsView_3 = QGraphicsView(self.spectra_group)
-        self.graphicsView_3.setObjectName(u"graphicsView_3")
-        self.graphicsView_3.setGeometry(QRect(360, 60, 321, 201))
-        self.graphicsView_3.setStyleSheet(u"background-color: rgb(255,255,255)")
-        self.graphicsView_4 = QGraphicsView(self.spectra_group)
-        self.graphicsView_4.setObjectName(u"graphicsView_4")
-        self.graphicsView_4.setGeometry(QRect(20, 290, 321, 201))
-        self.graphicsView_4.setStyleSheet(u"background-color: rgb(255,255,255)")
-        self.graphicsView_5 = QGraphicsView(self.spectra_group)
-        self.graphicsView_5.setObjectName(u"graphicsView_5")
-        self.graphicsView_5.setGeometry(QRect(360, 290, 321, 201))
-        self.graphicsView_5.setStyleSheet(u"background-color: rgb(255,255,255)")
+        self.graphicsView_2 = self.setup_matplotlib_widget(self.spectra_group, QRect(20, 60, 321, 201), 'CDgraph')
+        self.graphicsView_3 = self.setup_matplotlib_widget(self.spectra_group, QRect(360, 60, 321, 201), 'g_absgraph')
+        self.graphicsView_4 = self.setup_matplotlib_widget(self.spectra_group, QRect(20, 290, 321, 201),
+                                                           'molar_ellipsgraph')
+        self.graphicsView_5 = self.setup_matplotlib_widget(self.spectra_group, QRect(360, 290, 321, 201), 'LDgraph')
         self.label_29 = QLabel(self.spectra_group)
         self.label_29.setObjectName(u"label_29")
         self.label_29.setGeometry(QRect(20, 270, 49, 16))
@@ -493,6 +497,7 @@ class Ui_MainWindow(QObject):
         for var, edt in self.input_mapping.items():
             edt.textChanged.connect(lambda: self.controller.edt_changed(var))
 
+        self.range_input.currentIndexChanged.connect(self.on_range_input_changed)
         self.retranslateUi(MainWindow)
         QMetaObject.connectSlotsByName(MainWindow)
 
@@ -524,11 +529,13 @@ class Ui_MainWindow(QObject):
         self.offset_input.setStyleSheet("background-color: white")  # reset color
 
     @pyqtSlot()
-    def on_set_range_clicked(self):
-        range_text = self.range_input.text()
+    def on_range_input_changed(self):
+        range_text = self.range_input.currentText()
         range_value = float(range_text) if range_text else 0.0
-        self.rangeClicked.emit(range_value)
-        self.range_input.setStyleSheet("background-color: white")  # reset color
+        self.rangeChosen.emit(range_value)
+
+    def on_set_range_clicked(self):
+        self.rangeClicked.emit()
 
     @pyqtSlot()
     def on_start_button_clicked(self):
@@ -544,6 +551,10 @@ class Ui_MainWindow(QObject):
         comments_value = str(comments_text) if comments_text else "no comments"
         self.savecommentsClicked.emit(comments_value)
         self.comments_input.setStyleSheet("background-color: white")  # reset color
+
+    @pyqtSlot()
+    def on_calibrate_clicked(self):
+        self.calibrateClicked.emit()
 
     @pyqtSlot()
     def on_set_wavelength_clicked(self):
@@ -569,6 +580,19 @@ class Ui_MainWindow(QObject):
         self.ax.clear()  # clear the previous plot
         self.ax.plot(data['CD'], data['dc'])
         self.pmt_spectra_view.draw()  # refresh the FigureCanvas
+
+    def setup_matplotlib_widget(self, parent, geometry, name):
+        widget = QWidget(parent)
+        widget.setObjectName(u"graphicsView_" + name)
+        widget.setGeometry(geometry)
+        widget.setStyleSheet(u"background-color: rgb(255,255,255)")
+        fig = Figure(figsize=(6, 5), dpi=50)
+        ax = fig.add_subplot(111)
+        canvas = FigureCanvas(fig)
+        canvas_layout = QVBoxLayout()
+        canvas_layout.addWidget(canvas)
+        widget.setLayout(canvas_layout)
+        return widget
 
     # setupUii
 

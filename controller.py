@@ -129,44 +129,12 @@ class Controller(QMainWindow):
         self.ui.savecommentsClicked.connect(self.save_comments_from_edt)
         self.ui.gainClicked.connect(self.set_gain_from_edt)
         self.ui.rangeClicked.connect(self.set_range_from_edt)
-        self.ui.setwavelengthClicked.connect(self.set_wavelength_from_edt)
-
-    def set_PMT_volt_from_edt(self, v):
-        try:
-            if (v <= 1.1) and (v >= 0.0):
-                self.set_PMT_voltage(v)  # You need to define this method.
-        except ValueError as e:
-            self.log('Error in set_PMT_voltage_from_edt: ' + str(e), True)
-
-    def set_wavelength_from_edt(self, v):
-        try:
-            self.set_wavelength(v)  # You need to define this method.
-        except ValueError as e:
-            self.log('Error in set_wavelength_from_edt: ' + str(e), True)
-
-    def set_offset_from_edt(self, v):
-        try:
-            self.set_offset(v)  # You need to define this method.
-        except ValueError as e:
-            self.log('Error in set_offset_from_edt: ' + str(e), True)
-
-    def save_comments_from_edt(self, v):
-        self.save_comments(v)  # TODO:You need to define this method.
-
-    def set_gain_from_edt(self, v):
-        try:
-            g = float(self.gui.edt_gain.get())
-            if g <= self.max_gain:
-                self.set_PMT_voltage(self.gain_to_volt(g))
-                  # You need to define this method.
-        except ValueError as e:
-            self.log('Error in set_gain_from_edt: ' + str(e), True)
-
-    def set_range_from_edt(self, v):
-        try:
-            self.set_range(v)  # You need to define this method.
-        except ValueError as e:
-            self.log('Error in set_range_from_edt: ' + str(e), True)
+        self.ui.setwavelengthClicked.connect(self.set_WL_from_edt)
+        self.ui.initializeClicked.clicked.connect(self.init_devices)
+        self.ui.rangeChosen.connect(self.set_input_range)
+        self.ui.calibrateClicked.clicked.connect(self.cal_phaseoffset_start)
+        self.ui.startbuttonClicked.clicked.connect(self.start_spec)
+        self.ui.stopbuttonClicked.clicked.connect(self.abort_measurement)
 
     def set_initialized(self, init):
         self.initialized = init
@@ -389,6 +357,68 @@ class Controller(QMainWindow):
             except queue.Empty:
                 pass
 
+    def set_PMT_volt_from_edt(self, v):
+        try:
+            if (v <= 1.1) and (v >= 0.0):
+                self.set_PMT_voltage(v)
+        except ValueError as e:
+            self.log('Error in set_PMT_voltage_from_edt: ' + str(e), True)
+
+    def set_WL_from_edt(self, nm):
+        try:
+            self.move_nm(nm)
+        except ValueError as e:
+            self.log('Error in set_WL_from_edt: ' + str(e), True)
+
+    def set_offset_from_edt(self, po):
+        try:
+            self.set_phaseoffset(po)  # You need to define this method.
+        except ValueError as e:
+            self.log('Error in set_offset_from_edt: ' + str(e), True)
+
+    def save_comments_from_edt(self, v):
+        self.save_comments(v)  # TODO:You need to define this method.
+
+    def set_gain_from_edt(self, v):
+        try:
+            if v <= self.max_gain:
+                self.set_PMT_voltage(self.gain_to_volt(v))  # You need to define this method.
+        except ValueError as e:
+            self.log('Error in set_gain_from_edt: ' + str(e), True)
+
+    def set_range_from_edt(self, v):
+        try:
+            self.set_range(v)  # You need to define this method.
+        except ValueError as e:
+            self.log('Error in set_range_from_edt: ' + str(e), True)
+
+    def update_progress_txt(self, start: float, stop: float, curr: float, run: int, run_count: int,
+                            time_since_start: float):
+        # Calculate progress in percent
+        if stop > start:
+            f = (1 - (stop - curr) / (stop - start)) * 100
+        else:
+            f = (1 - (curr - stop) / (start - stop)) * 100
+        self.gui.progressBar.setValue(f)
+
+        # Remaining time is estimated from progress+passed time
+        time_left = 0
+        if f > 0:
+            time_left = (run_count * 100 / (f + 100 * (run - 1)) - 1) * time_since_start
+
+            # Determine proper way to display the estimated remaining time
+        if time_left < 60:
+            unit = 's'
+        elif time_left < 3600:
+            unit = 'min'
+            time_left = time_left / 60
+        else:
+            unit = 'h'
+            time_left = time_left / 3600
+
+        self.gui.progressBar.time_left = time_left
+        self.gui.progressBar.unit = unit
+
     def open_cal_dialog(self):
         self.cal_dialog = PhaseOffsetCalibrationDialog(self)
         self.cal_dialog.show()
@@ -405,13 +435,6 @@ class Controller(QMainWindow):
     def edt_changed(self, var):
         edt = self.gui.input_mapping[var]
         edt.setStyleSheet("background-color: yellow")
-
-    def set_PMT_volt_from_edt(self, v):
-        try:
-            if (v <= 1.1) and (v >= 0.0):
-                self.set_PMT_voltage(v)
-        except ValueError as e:
-            self.log('Error in set_PMT_voltage_from_edt: ' + str(e), True)
 
     def handle_thread_exception(self, msg):
         # Handle the exception message in some way. For example, you could print it:
@@ -432,31 +455,6 @@ class Controller(QMainWindow):
     def cal_end(self):
         pass
 
-    def on_closing(self):
-        """Save parameters, disconnect devices and close application when asked to quit."""
-        reply = QMessageBox.question(self.gui.window, 'Quit', 'Do you want to quit?',
-                                     QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
-
-        if reply == QMessageBox.Yes:
-            # Stop all running threads
-            if self.spec_thread and self.spec_thread.is_alive():
-                self.abort_measurement()
-                time.sleep(1)
-
-            if self.cal_theta_thread and self.cal_theta_thread.is_alive():
-                self.cal_stop_record()
-                time.sleep(1)
-
-            # Save parameters and disconnect devices before closing
-            self.save_params('last')
-
-            if self.initialized:
-                self.disconnect_devices()
-
-            # Close the application window
-            self.gui.window.close()
-
-        # Rest of the class goes here...
 
 
 class RecordThread(QThread):
