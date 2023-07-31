@@ -1,15 +1,20 @@
+import collections
+import os
+import queue
+import re
 import time
 
+import numpy as np
 import pyvisa
-from PyQt5.QtWidgets import QApplication, QMainWindow, QVBoxLayout, QDialog, QLabel, QPushButton
-from PyQt5.QtCore import QTimer, Qt, QThread, pyqtSignal
+from PyQt5.QtCore import QTimer, QThread, pyqtSignal, QMutex, QCoreApplication
+from PyQt5.QtWidgets import QMainWindow
+from PyQt5.QtWidgets import QMessageBox
+from PyQt5.QtWidgets import QVBoxLayout, QDialog, QLabel, QPushButton
 
+import gui
 from mfli import MFLI
 from mono import Monoi, Monoii
-import collections
-from PyQt5.QtWidgets import QMessageBox
 from pem import PEM
-import numpy as np
 
 
 class Controller(QMainWindow):
@@ -38,33 +43,33 @@ class Controller(QMainWindow):
     max_volt_hist_lenght = 75  # number of data points in the signal tuning graph
     edt_changed_color = '#FFBAC5'
 
-    curr_spec = np.array([[],  # wavelenght
+    curr_spec = np.array([[],  # wavelength
                           [],  # DC
                           [],  # DC stddev
-                          [],  # AC
-                          [],  # AC stddev
+                          [],  # CD
+                          [],  # CD stddev
                           [],  # I_L
                           [],  # I_L stddev
                           [],  # I_R
                           [],  # I_R stddev
-                          [],  # glum
-                          [],  # glum stddev
-                          [],  # lp_r
-                          [],  # lp_r stddev
-                          [],  # lp theta
-                          [],  # lp theta stddev
-                          [],  # lp
-                          []])  # lp stddev
+                          [],  # g_abs
+                          [],  # g_abs stddev
+                          [],  # ld
+                          [],  # ld stddev
+                          [],  # molar_ellip
+                          [],  # molar_ellip stddev
+                          [],  # ellip
+                          []])  # ellip stddev
     index_ac = 3  # in curr_spec
     index_dc = 1
-    index_glum = 9
+    index_gabs = 9
     index_lp_theta = 13
 
     # averaged spectrum during measurement
     avg_spec = np.array([[],  # wavelenght
                          [],  # DC
                          [],  # AC
-                         []])  # glum
+                         []])  # gabs
 
     # variables required for phase offset calibration
     cal_running = False
@@ -74,13 +79,173 @@ class Controller(QMainWindow):
 
     def __init__(self):
         super().__init__()
-        self.cal_running = False
-        self.cal_theta_thread = None
-        # ... other necessary properties
+        # Locks to prevent race conditions in multithreading
+        self.pem_lock = QMutex()
+        self.monoi_lock = QMutex()
+        self.monoii_lock = QMutex()
+        self.lockin_daq_lock = QMutex()
+        self.lockin_osc_lock = QMutex()
+        self.pem_lock.lock()
+        self.monoi_lock.lock()
+        self.monoii_lock.lock()
+        self.lockin_daq_lock.lock()
+        self.lockin_osc_lock.lock()
+
+        # This trigger to stop spectra acquisition is a list to pass it by reference to the read_data thread
+        self.stop_spec_trigger = [False]
+        # For oscilloscope monitoring
+        self.stop_osc_trigger = False
+        # For phaseoffset calibration
+        self.stop_cal_trigger = [False]
+        self.spec_thread = None
+
+        # Create GUI
+        self.ui = gui.Ui_MainWindow()
+        self.ui.setupUi(self)
+
+        # Setup log queue and log box
+        self.log_queue = queue.Queue()
+        self.log_box = self.gui.edt_debuglog
+
+        self.assign_gui_events()
+
+        if os.path.exists("last_params.txt"):
+            self.load_last_settings()
+
+        self.set_initialized(False)
+        self.set_acquisition_running(False)
+
+        self.log_author_message()
+        self.update_log()
+
+        # gui portion of updating log
+        self.log_timer = QTimer()
+        self.log_timer.timeout.connect(self.update_log)
+        self.log_timer.start(self.log_update_interval)
+
+        # connecting clicked buttons info
+        self.ui.setpmtClicked.connect(self.set_PMT_volt_from_edt)
+        self.ui.offsetClicked.connect(self.set_offset_from_edt)
+        self.ui.savecommentsClicked.connect(self.save_comments_from_edt)
+        self.ui.gainClicked.connect(self.set_gain_from_edt)
+        self.ui.rangeClicked.connect(self.set_range_from_edt)
+        self.ui.setwavelengthClicked.connect(self.set_wavelength_from_edt)
+
+    def set_PMT_volt_from_edt(self, v):
+        try:
+            if (v <= 1.1) and (v >= 0.0):
+                self.set_PMT_voltage(v)  # You need to define this method.
+        except ValueError as e:
+            self.log('Error in set_PMT_voltage_from_edt: ' + str(e), True)
+
+    def set_wavelength_from_edt(self, v):
+        try:
+            self.set_wavelength(v)  # You need to define this method.
+        except ValueError as e:
+            self.log('Error in set_wavelength_from_edt: ' + str(e), True)
+
+    def set_offset_from_edt(self, v):
+        try:
+            self.set_offset(v)  # You need to define this method.
+        except ValueError as e:
+            self.log('Error in set_offset_from_edt: ' + str(e), True)
+
+    def save_comments_from_edt(self, v):
+        self.save_comments(v)  # TODO:You need to define this method.
+
+    def set_gain_from_edt(self, v):
+        try:
+            g = float(self.gui.edt_gain.get())
+            if g <= self.max_gain:
+                self.set_PMT_voltage(self.gain_to_volt(g))
+                  # You need to define this method.
+        except ValueError as e:
+            self.log('Error in set_gain_from_edt: ' + str(e), True)
+
+    def set_range_from_edt(self, v):
+        try:
+            self.set_range(v)  # You need to define this method.
+        except ValueError as e:
+            self.log('Error in set_range_from_edt: ' + str(e), True)
+
+    def set_initialized(self, init):
+        self.initialized = init
+
+        if self.initialized:
+            self.gui.initialize_button.setEnabled(False)  # disable button
+            self.gui.initialize_button.setStyleSheet("background-color: grey")  # change color to grey
+            self.gui.close_button.setEnabled(True)  # enable button
+            self.gui.close_button.setStyleSheet("background-color: white")
+            self.gui.signaltuning_group.setEnabled(True)
+            self.gui.spectrasetup_group.setEnabled(True)
+            self.gui.spectra_group.setEnabled(True)
+        else:
+            self.gui.initialize_button.setEnabled(True)  # enable button
+            self.gui.initialize_button.setStyleSheet("background-color: white")  # reset color
+            self.gui.close_button.setEnabled(False)  # disable button
+            self.gui.signaltuning_group.setEnabled(False)
+            self.gui.spectrasetup_group.setEnabled(False)
+            self.gui.spectra_group.setEnabled(False)
+
+    def load_last_settings(self):
+        def re_search(key, text):
+            res = re.search(key, text)
+            if res is None:
+                return ''
+            else:
+                return res.group(1)
+
+        f = open('last_params.txt', 'r')
+        s = f.read()
+        f.close()
+
+        keywords = [r'Spectra Name = (.*)\n',
+                    r'Start WL = ([0-9\.]*) nm\n',
+                    r'End WL = ([0-9\.]*) nm\n',
+                    r'Step = ([0-9\.]*) nm\n',
+                    r'Dwell time = ([0-9\.]*) s\n',
+                    r'Repetitions = ([0-9]*)\n',
+                    r'Exc. WL = ([0-9\.]*) nm\n',
+                    r'Comment = (.*)\n',
+                    r'AC-Blank-File = (.*)\n',
+                    r'Phase offset = ([0-9\.]*) deg',
+                    r'DC-Blank-File = (.*)\n',
+                    r'Detector Correction File = (.*)\n']
+
+        edts = ['edt_filename',
+                'edt_start',
+                'edt_end',
+                'edt_step',
+                'edt_dwell',
+                'edt_rep',
+                'edt_excWL',
+                'edt_comment',
+                'edt_ac_blank',
+                'edt_phaseoffset',
+                'edt_dc_blank',
+                'edt_det_corr']
+
+        for i in range(0, len(keywords)):
+            val = re_search(keywords[i], s)
+            if val != '':
+                self.set_edt_text(edts[i], val)
+
+        blank = re_search('PEM off = ([01])\n', s)
+        if blank == '1':
+            self.gui.var_pem_off.set(1)
+        else:
+            self.gui.var_pem_off.set(0)
+
+        input_range = re_search('Input range = ([0-9\.]*)\n', s)
+        if input_range in self.input_ranges:
+            self.gui.cbx_range.set(input_range)
+
+    def set_edt_text(self, edt, text):
+        self.gui.set_text(edt, text)
 
     def init_devices(self):
         """Initialize all the devices used in the setup. The devices include PEM-200,
-        monochromator SP-2155 and lock-in amplifiers MFLI."""
+        monochromators SP-2155 and lock-in amplifier MFLI."""
         try:
             # Initialize PEM-200
             rm_pem = pyvisa.ResourceManager()
@@ -140,7 +305,7 @@ class Controller(QMainWindow):
                         self.stop_osc_trigger = False
                         self.start_osc_monit()
 
-                        if b1:
+                        if b4:
                             self.log('Initialize monochromator 2 SP-2155...')
                             rm_monoii = pyvisa.ResourceManager()
                             self.window_update()
@@ -152,7 +317,7 @@ class Controller(QMainWindow):
                             self.window_update()
                             self.log('')
 
-                        # If all devices were initialized successfully, setup is complete
+                            # If all devices were initialized successfully, setup is complete
                             if b5:
                                 self.set_initialized(True)
                                 self.move_nm(1000)
@@ -181,7 +346,8 @@ class Controller(QMainWindow):
         try:
             # Disconnect all devices
             self.pem.close()
-            self.mono.close()
+            self.monoi.close()
+            self.monoii.close()
             self.lockin_daq.disconnect()
             self.lockin_osc.disconnect()
 
@@ -191,6 +357,37 @@ class Controller(QMainWindow):
         except Exception as e:
             # If any error occurs during the disconnection process, log the error
             self.log('Error while closing connections: {}.'.format(str(e)), True)
+
+    def on_closing(self):
+        reply = QMessageBox.question(self, 'Quit', 'Do you want to quit?',
+                                     QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+
+        if reply == QMessageBox.Yes:
+            if self.spec_thread is not None:
+                if self.spec_thread.isRunning():
+                    self.abort_measurement()
+                    time.sleep(1)
+            if self.cal_theta_thread is not None:
+                if self.cal_theta_thread.isRunning():
+                    self.cal_stop_record()
+                    time.sleep(1)
+
+            self.save_params('last')
+
+            if self.initialized:
+                self.disconnect_devices()
+            QCoreApplication.instance().quit()
+        else:
+            pass
+
+    def update_log(self):
+        # Handle all log messages currently in the queue, if any
+        while self.log_queue.qsize():
+            try:
+                msg = self.log_queue.get(0)
+                self.log_box.append(msg)  # in PyQt, you can append text directly to a QTextEdit
+            except queue.Empty:
+                pass
 
     def open_cal_dialog(self):
         self.cal_dialog = PhaseOffsetCalibrationDialog(self)
@@ -204,6 +401,17 @@ class Controller(QMainWindow):
         self.cal_theta_thread = RecordThread(self, positive)
         self.cal_theta_thread.exceptionSignal.connect(self.handle_thread_exception)
         self.cal_theta_thread.start()
+
+    def edt_changed(self, var):
+        edt = self.gui.input_mapping[var]
+        edt.setStyleSheet("background-color: yellow")
+
+    def set_PMT_volt_from_edt(self, v):
+        try:
+            if (v <= 1.1) and (v >= 0.0):
+                self.set_PMT_voltage(v)
+        except ValueError as e:
+            self.log('Error in set_PMT_voltage_from_edt: ' + str(e), True)
 
     def handle_thread_exception(self, msg):
         # Handle the exception message in some way. For example, you could print it:
@@ -223,7 +431,6 @@ class Controller(QMainWindow):
 
     def cal_end(self):
         pass
-
 
     def on_closing(self):
         """Save parameters, disconnect devices and close application when asked to quit."""
@@ -251,6 +458,7 @@ class Controller(QMainWindow):
 
         # Rest of the class goes here...
 
+
 class RecordThread(QThread):
     exceptionSignal = pyqtSignal(str)  # Define a signal to emit exception messages
 
@@ -273,10 +481,6 @@ class RecordThread(QThread):
             self.controller.log('Thread stopped...')
         except Exception as e:
             self.exceptionSignal.emit(str(e))
-
-
-
-
 
 
 class PhaseOffsetCalibrationDialog(QDialog):
@@ -412,8 +616,8 @@ class PhaseOffsetCalibrationDialog(QDialog):
             self.next_step()
 
     def update_loop(self):
-        if self.step in [1,3] and self.controller.cal_running:
-            self.lbl_time.setText('Time passed (>1200 s recommended): {:.0f} s'.format(time.time()-self.t0))
+        if self.step in [1, 3] and self.controller.cal_running:
+            self.lbl_time.setText('Time passed (>1200 s recommended): {:.0f} s'.format(time.time() - self.t0))
             current_values = self.controller.cal_get_current_values()
             self.lbl_average.setText('Average phase: {:.3f} deg'.format(current_values[0]))
             self.lbl_datapoints.setText('Number of data points: {}'.format(current_values[1]))
@@ -426,10 +630,9 @@ class PhaseOffsetCalibrationDialog(QDialog):
 
     def close(self):
         self.log('Calibration aborted.')
-        if self.step in [1,3]:
+        if self.step in [1, 3]:
             self.controller.cal_stop_record()
         self.controller.cal_end_after_thread()
 
     def disable_event(self):
         pass
-

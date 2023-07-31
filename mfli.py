@@ -17,6 +17,7 @@ from IPython.core.interactiveshell import InteractiveShell
 
 InteractiveShell.ast_node_interactivity = "all"
 
+
 class MFLI(LogObject):
     sampling_rate = 104.6  # s-1 data transfer rate
     time_const = 0.00811410938  # s, time constant of the low-pass filter of the lock-in amplifier
@@ -391,7 +392,7 @@ class MFLI(LogObject):
                 # Calc I_L=(AC+DC)
                 I_L = np.add(ac, dc)
                 # Calc I_R=(DC-AC)
-                I_R = np.subtract(dc , ac)
+                I_R = np.subtract(dc, ac)
                 # Calculation of gabs
                 # Element-wise calculations
                 I_L_minus_I_R = np.subtract(I_L, I_R)
@@ -401,7 +402,9 @@ class MFLI(LogObject):
                 # calculation of molar ellipticity
                 molar_ellip = np.multiply(dc, dc)
                 ellip = np.multiply(dc, dc)
-
+                # TODO
+                ld = np.add(ac, ac)
+                ld_theta = np.add(ac, ac)
 
                 # The error of the values is calculates as the standard deviation in the data set that is collected for one wavelength
                 if ac.shape[0] > 0:
@@ -417,8 +420,8 @@ class MFLI(LogObject):
                                 np.std(I_R),
                                 np.average(g_abs),
                                 np.std(g_abs),
-                                np.average(ac_theta),
-                                np.std(ac_theta),
+                                np.average(ld),
+                                np.std(ld),
                                 np.average(molar_ellip),
                                 np.std(molar_ellip),
                                 np.average(ellip),
@@ -470,4 +473,3 @@ class MFLI(LogObject):
         self.log('Stop recording AC theta...')
         ext_abort_flag[0] = False
         return self.ac_theta_avg
-

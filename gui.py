@@ -21,21 +21,10 @@ class Ui_MainWindow(QObject):
     gainClicked = pyqtSignal()
     offsetClicked = pyqtSignal()
     rangeClicked = pyqtSignal()
-    stepsizeClicked = pyqtSignal()
-    wlmaxClicked = pyqtSignal()
-    dwelltimeClicked = pyqtSignal()
-    wlminClicked = pyqtSignal()
-    filenameClicked = pyqtSignal()
-    detcorrectionsClicked = pyqtSignal()
-    acClicked = pyqtSignal()
-    repetitionsClicked = pyqtSignal()
-    samplecClicked = pyqtSignal()
-    dcClicked = pyqtSignal()
     startbuttonClicked = pyqtSignal()
     stopbuttonClicked = pyqtSignal()
     savecommentsClicked = pyqtSignal()
-    pathClicked = pyqtSignal()
-    savenotesClicked = pyqtSignal()
+    setwavelengthClicked = pyqtSignal()
 
     def __init__(self):
         super().__init__()
@@ -43,6 +32,41 @@ class Ui_MainWindow(QObject):
         self.mfli = MFLI(ID="dev7024", logname="mfli_log", log_queue=log_queue)
         self.controller = Controller()
         self.PhaseOffsetCalibrationDialog = PhaseOffsetCalibrationDialog(self.controller)
+        self.edits_map = {
+            "edt_filename": self.filename_input,
+            "edt_start": self.wl_min,
+            "edt_end": self.wl_max,
+            "edt_step": self.stepsize_input,
+            "edt_dwell": self.dwelltime_input,
+            "edt_rep": self.repetitions_input,
+            "edt_excWL": self.wavelength_input,
+            "edt_comment": self.comments_input,
+            "edt_ac_blank": self.ac_input,
+            "edt_phaseoffset": self.offset_input,
+            "edt_dc_blank": self.dc_input,
+            "edt_det_corr": self.detcorrection_input,
+        }
+
+        self.input_mapping = {
+            "edt_pmt": self.pmt_input,
+            "edt_range": self.range_input,
+            "edt_gain": self.gain_input,
+            "edt_excWL": self.wavelength_input,
+            "edt_phaseoffset": self.offset_input
+        }
+        self.close_button.clicked.connect(self.close)
+
+    def set_text(self, edt, text):
+        # Find the QLineEdit instance by name
+        edit = self.edits_map.get(edt)
+        if edit is not None:
+            edit.setText(text)
+        else:
+            print(f"No QLineEdit named {edt} found.")
+
+    def closeEvent(self, event):
+        self.controller.on_closing()
+        event.accept()
 
     def setupUi(self, MainWindow):
         if not MainWindow.objectName():
@@ -78,6 +102,7 @@ class Ui_MainWindow(QObject):
         self.close_button.setGeometry(QRect(10, 70, 75, 24))
         self.close_button.setFont(font2)
         self.close_button.setStyleSheet(u"background-color: rgb(255, 255, 255)")
+        self.close_button.setEnabled(False)
         self.label = QLabel(self.devicesetup_group)
         self.label.setObjectName(u"label")
         self.label.setGeometry(QRect(10, 100, 49, 16))
@@ -116,6 +141,7 @@ class Ui_MainWindow(QObject):
         self.signaltuning_group.setFont(font1)
         self.signaltuning_group.setAutoFillBackground(False)
         self.signaltuning_group.setStyleSheet(u"background-color: rgb(195, 195, 255)")
+        self.signaltuning_group.setEnabled(False)
 
         # pmt spectra
         # Create a Figure for your plot
@@ -157,7 +183,7 @@ class Ui_MainWindow(QObject):
         self.label_13.setFont(font3)
         self.label_15 = QLabel(self.signaltuning_group)
         self.label_15.setObjectName(u"label_15")
-        self.label_15.setGeometry(QRect(10, 410, 81, 16))
+        self.label_15.setGeometry(QRect(10, 410, 81, 21))
         self.label_15.setFont(font3)
         self.peak_voltagetext = QLabel(self.signaltuning_group)
         self.peak_voltagetext.setObjectName(u"peak_voltagetext")
@@ -175,25 +201,20 @@ class Ui_MainWindow(QObject):
         font4.setPointSize(9)
         self.set_pmt.setFont(font4)
         self.set_pmt.setStyleSheet(u"background-color: rgb(255, 255, 255)")
-        self.save_notes = QPushButton(self.signaltuning_group)
-        self.save_notes.setObjectName(u"save_notes")
-        self.save_notes.setGeometry(QRect(100, 560, 51, 21))
-        self.save_notes.setFont(font2)
-        self.save_notes.setStyleSheet(u"background-color: rgb(255, 255, 255)")
         self.label_26 = QLabel(self.signaltuning_group)
         self.label_26.setObjectName(u"label_26")
-        self.label_26.setGeometry(QRect(10, 450, 81, 16))
+        self.label_26.setGeometry(QRect(10, 450, 81, 21))
         self.label_26.setFont(font3)
         self.set_gain = QPushButton(self.signaltuning_group)
         self.set_gain.setObjectName(u"set_gain")
         self.set_gain.setGeometry(QRect(250, 330, 51, 24))
         self.set_gain.setFont(font4)
         self.set_gain.setStyleSheet(u"background-color: rgb(255, 255, 255)")
-        self.set_offset = QPushButton(self.signaltuning_group)
-        self.set_offset.setObjectName(u"set_offset")
-        self.set_offset.setGeometry(QRect(250, 370, 51, 24))
-        self.set_offset.setFont(font4)
-        self.set_offset.setStyleSheet(u"background-color: rgb(255, 255, 255)")
+        self.set_wavelength = QPushButton(self.signaltuning_group)
+        self.set_wavelength.setObjectName(u"set_wavelength")
+        self.set_wavelength.setGeometry(QRect(250, 370, 51, 24))
+        self.set_wavelength.setFont(font4)
+        self.set_wavelength.setStyleSheet(u"background-color: rgb(255, 255, 255)")
         self.pmt_input = QLineEdit(self.signaltuning_group)
         self.pmt_input.setObjectName(u"pmt_input")
         self.pmt_input.setGeometry(QRect(110, 290, 113, 21))
@@ -206,21 +227,31 @@ class Ui_MainWindow(QObject):
         self.gain_input.setObjectName(u"gain_input")
         self.gain_input.setGeometry(QRect(110, 330, 113, 21))
         self.gain_input.setStyleSheet(u"background-color: rgb(255, 255, 255)")
-        self.offset_input = QLineEdit(self.signaltuning_group)
-        self.offset_input.setObjectName(u"offset_input")
-        self.offset_input.setGeometry(QRect(110, 370, 113, 21))
-        self.offset_input.setStyleSheet(u"background-color: rgb(255, 255, 255)")
+        self.wavelength_input = QLineEdit(self.signaltuning_group)
+        self.wavelength_input.setObjectName(u"wavelength_input")
+        self.wavelength_input.setGeometry(QRect(110, 370, 113, 21))
+        self.wavelength_input.setStyleSheet(u"background-color: rgb(255, 255, 255)")
         self.set_range = QPushButton(self.signaltuning_group)
         self.set_range.setObjectName(u"set_range")
         self.set_range.setGeometry(QRect(250, 410, 51, 24))
         self.set_range.setFont(font4)
         self.set_range.setStyleSheet(u"background-color: rgb(255, 255, 255)")
-        self.notes_input = QPlainTextEdit(self.signaltuning_group)
-        self.notes_input.setObjectName(u"notes_input")
-        self.notes_input.setGeometry(QRect(110, 450, 191, 81))
-        self.notes_input.setFont(font2)
-        self.notes_input.setStyleSheet(u"background-color: rgb(255, 255, 255)")
-        self.pmt_spectra_view.raise_()
+        self.offset_input = QLineEdit(self.signaltuning_group)
+        self.offset_input.setObjectName(u"offset_input")
+        self.offset_input.setGeometry(QRect(110, 450, 113, 21))
+        self.offset_input.setStyleSheet(u"background-color: rgb(255, 255, 255)")
+        self.set_offset = QPushButton(self.signaltuning_group)
+        self.set_offset.setObjectName(u"set_offset")
+        self.set_offset.setGeometry(QRect(250, 450, 51, 24))
+        self.set_offset.setFont(font4)
+        self.set_offset.setStyleSheet(u"background-color: rgb(255, 255, 255)")
+        self.calibrate = QPushButton(self.signaltuning_group)
+        self.calibrate.setObjectName(u"calibrate")
+        self.calibrate.setEnabled(True)
+        self.calibrate.setGeometry(QRect(110, 490, 191, 24))
+        self.calibrate.setFont(font4)
+        self.calibrate.setStyleSheet(u"background-color: rgb(255, 255, 255)")
+        self.graphicsView.raise_()
         self.label_9.raise_()
         self.label_10.raise_()
         self.label_11.raise_()
@@ -230,30 +261,28 @@ class Ui_MainWindow(QObject):
         self.peak_voltagetext.raise_()
         self.avg_voltagetext.raise_()
         self.set_pmt.raise_()
-        self.save_notes.raise_()
         self.label_26.raise_()
         self.set_gain.raise_()
-        self.set_offset.raise_()
+        self.set_wavelength.raise_()
         self.range_input.raise_()
         self.gain_input.raise_()
-        self.offset_input.raise_()
+        self.wavelength_input.raise_()
         self.set_range.raise_()
-        self.notes_input.raise_()
         self.pmt_input.raise_()
+        self.offset_input.raise_()
+        self.set_offset.raise_()
+        self.calibrate.raise_()
         self.spectrasetup_group = QGroupBox(self.centralwidget)
         self.spectrasetup_group.setObjectName(u"spectrasetup_group")
         self.spectrasetup_group.setGeometry(QRect(390, 10, 381, 851))
         self.spectrasetup_group.setFont(font1)
         self.spectrasetup_group.setAutoFillBackground(False)
         self.spectrasetup_group.setStyleSheet(u"background-color: rgb(195, 235, 255)")
-        self.set_stepsize = QPushButton(self.spectrasetup_group)
-        self.set_stepsize.setObjectName(u"set_stepsize")
-        self.set_stepsize.setGeometry(QRect(280, 140, 51, 24))
-        self.set_stepsize.setFont(font4)
-        self.set_stepsize.setStyleSheet(u"background-color: rgb(255, 255, 255)")
+        self.spectrasetup_group.setEnabled(False)
+
         self.wl_min = QLineEdit(self.spectrasetup_group)
         self.wl_min.setObjectName(u"wl_min")
-        self.wl_min.setGeometry(QRect(140, 60, 113, 21))
+        self.wl_min.setGeometry(QRect(140, 60, 155, 21))
         self.wl_min.setStyleSheet(u"background-color: rgb(255, 255, 255)")
         self.label_14 = QLabel(self.spectrasetup_group)
         self.label_14.setObjectName(u"label_14")
@@ -261,15 +290,15 @@ class Ui_MainWindow(QObject):
         self.label_14.setFont(font3)
         self.dwelltime_input = QLineEdit(self.spectrasetup_group)
         self.dwelltime_input.setObjectName(u"dwelltime_input")
-        self.dwelltime_input.setGeometry(QRect(140, 180, 113, 21))
+        self.dwelltime_input.setGeometry(QRect(140, 180, 155, 21))
         self.dwelltime_input.setStyleSheet(u"background-color: rgb(255, 255, 255)")
         self.wl_max = QLineEdit(self.spectrasetup_group)
         self.wl_max.setObjectName(u"wl_max")
-        self.wl_max.setGeometry(QRect(140, 100, 113, 21))
+        self.wl_max.setGeometry(QRect(140, 100, 155, 21))
         self.wl_max.setStyleSheet(u"background-color: rgb(255, 255, 255)")
         self.stepsize_input = QLineEdit(self.spectrasetup_group)
         self.stepsize_input.setObjectName(u"stepsize_input")
-        self.stepsize_input.setGeometry(QRect(140, 140, 113, 21))
+        self.stepsize_input.setGeometry(QRect(140, 140, 155, 21))
         self.stepsize_input.setStyleSheet(u"background-color: rgb(255, 255, 255)")
         self.label_18 = QLabel(self.spectrasetup_group)
         self.label_18.setObjectName(u"label_18")
@@ -279,33 +308,13 @@ class Ui_MainWindow(QObject):
         self.label_19.setObjectName(u"label_19")
         self.label_19.setGeometry(QRect(20, 60, 101, 16))
         self.label_19.setFont(font3)
-        self.set_wl_max = QPushButton(self.spectrasetup_group)
-        self.set_wl_max.setObjectName(u"set_wl_max")
-        self.set_wl_max.setGeometry(QRect(280, 100, 51, 24))
-        self.set_wl_max.setFont(font4)
-        self.set_wl_max.setStyleSheet(u"background-color: rgb(255, 255, 255)")
-        self.set_dwelltime = QPushButton(self.spectrasetup_group)
-        self.set_dwelltime.setObjectName(u"set_dwelltime")
-        self.set_dwelltime.setGeometry(QRect(280, 180, 51, 24))
-        self.set_dwelltime.setFont(font4)
-        self.set_dwelltime.setStyleSheet(u"background-color: rgb(255, 255, 255)")
         self.label_20 = QLabel(self.spectrasetup_group)
         self.label_20.setObjectName(u"label_20")
         self.label_20.setGeometry(QRect(20, 100, 91, 16))
         self.label_20.setFont(font3)
-        self.set_wlmin = QPushButton(self.spectrasetup_group)
-        self.set_wlmin.setObjectName(u"set_wlmin")
-        self.set_wlmin.setGeometry(QRect(280, 60, 51, 24))
-        self.set_wlmin.setFont(font4)
-        self.set_wlmin.setStyleSheet(u"background-color: rgb(255, 255, 255)")
-        self.set_filename = QPushButton(self.spectrasetup_group)
-        self.set_filename.setObjectName(u"set_filename")
-        self.set_filename.setGeometry(QRect(280, 300, 51, 24))
-        self.set_filename.setFont(font4)
-        self.set_filename.setStyleSheet(u"background-color: rgb(255, 255, 255)")
         self.repetitions_input = QLineEdit(self.spectrasetup_group)
         self.repetitions_input.setObjectName(u"repetitions_input")
-        self.repetitions_input.setGeometry(QRect(140, 220, 113, 21))
+        self.repetitions_input.setGeometry(QRect(140, 220, 155, 21))
         self.repetitions_input.setStyleSheet(u"background-color: rgb(255, 255, 255)")
         self.label_21 = QLabel(self.spectrasetup_group)
         self.label_21.setObjectName(u"label_21")
@@ -313,15 +322,15 @@ class Ui_MainWindow(QObject):
         self.label_21.setFont(font3)
         self.ac_input = QLineEdit(self.spectrasetup_group)
         self.ac_input.setObjectName(u"ac_input")
-        self.ac_input.setGeometry(QRect(140, 340, 113, 21))
+        self.ac_input.setGeometry(QRect(140, 340, 155, 21))
         self.ac_input.setStyleSheet(u"background-color: rgb(255, 255, 255)")
         self.detcorrection_input = QLineEdit(self.spectrasetup_group)
         self.detcorrection_input.setObjectName(u"detcorrection_input")
-        self.detcorrection_input.setGeometry(QRect(140, 260, 113, 21))
+        self.detcorrection_input.setGeometry(QRect(140, 260, 155, 21))
         self.detcorrection_input.setStyleSheet(u"background-color: rgb(255, 255, 255)")
         self.filename_input = QLineEdit(self.spectrasetup_group)
         self.filename_input.setObjectName(u"filename_input")
-        self.filename_input.setGeometry(QRect(140, 300, 113, 21))
+        self.filename_input.setGeometry(QRect(140, 300, 155, 21))
         self.filename_input.setStyleSheet(u"background-color: rgb(255, 255, 255)")
         self.label_22 = QLabel(self.spectrasetup_group)
         self.label_22.setObjectName(u"label_22")
@@ -331,28 +340,13 @@ class Ui_MainWindow(QObject):
         self.label_23.setObjectName(u"label_23")
         self.label_23.setGeometry(QRect(20, 220, 91, 16))
         self.label_23.setFont(font3)
-        self.set_detcorrections = QPushButton(self.spectrasetup_group)
-        self.set_detcorrections.setObjectName(u"set_detcorrections")
-        self.set_detcorrections.setGeometry(QRect(280, 260, 51, 24))
-        self.set_detcorrections.setFont(font4)
-        self.set_detcorrections.setStyleSheet(u"background-color: rgb(255, 255, 255)")
-        self.set_ac = QPushButton(self.spectrasetup_group)
-        self.set_ac.setObjectName(u"set_ac")
-        self.set_ac.setGeometry(QRect(280, 340, 51, 24))
-        self.set_ac.setFont(font4)
-        self.set_ac.setStyleSheet(u"background-color: rgb(255, 255, 255)")
         self.label_24 = QLabel(self.spectrasetup_group)
         self.label_24.setObjectName(u"label_24")
         self.label_24.setGeometry(QRect(20, 260, 111, 16))
         self.label_24.setFont(font3)
-        self.set_repetitions = QPushButton(self.spectrasetup_group)
-        self.set_repetitions.setObjectName(u"set_repetitions")
-        self.set_repetitions.setGeometry(QRect(280, 220, 51, 24))
-        self.set_repetitions.setFont(font4)
-        self.set_repetitions.setStyleSheet(u"background-color: rgb(255, 255, 255)")
         self.dc_input = QLineEdit(self.spectrasetup_group)
         self.dc_input.setObjectName(u"dc_input")
-        self.dc_input.setGeometry(QRect(140, 380, 113, 21))
+        self.dc_input.setGeometry(QRect(140, 380, 155, 21))
         self.dc_input.setStyleSheet(u"background-color: rgb(255, 255, 255)")
         self.label_25 = QLabel(self.spectrasetup_group)
         self.label_25.setObjectName(u"label_25")
@@ -360,26 +354,16 @@ class Ui_MainWindow(QObject):
         self.label_25.setFont(font3)
         self.samplec_input = QLineEdit(self.spectrasetup_group)
         self.samplec_input.setObjectName(u"samplec_input")
-        self.samplec_input.setGeometry(QRect(140, 420, 113, 21))
+        self.samplec_input.setGeometry(QRect(140, 420, 155, 21))
         self.samplec_input.setStyleSheet(u"background-color: rgb(255, 255, 255)")
         self.label_27 = QLabel(self.spectrasetup_group)
         self.label_27.setObjectName(u"label_27")
         self.label_27.setGeometry(QRect(20, 380, 101, 16))
         self.label_27.setFont(font3)
-        self.set_samplec = QPushButton(self.spectrasetup_group)
-        self.set_samplec.setObjectName(u"set_samplec")
-        self.set_samplec.setGeometry(QRect(280, 420, 51, 24))
-        self.set_samplec.setFont(font4)
-        self.set_samplec.setStyleSheet(u"background-color: rgb(255, 255, 255)")
         self.label_28 = QLabel(self.spectrasetup_group)
         self.label_28.setObjectName(u"label_28")
         self.label_28.setGeometry(QRect(20, 420, 121, 16))
         self.label_28.setFont(font3)
-        self.set_dc = QPushButton(self.spectrasetup_group)
-        self.set_dc.setObjectName(u"set_dc")
-        self.set_dc.setGeometry(QRect(280, 380, 51, 24))
-        self.set_dc.setFont(font4)
-        self.set_dc.setStyleSheet(u"background-color: rgb(255, 255, 255)")
         self.comments_input = QPlainTextEdit(self.spectrasetup_group)
         self.comments_input.setObjectName(u"comments_input")
         self.comments_input.setGeometry(QRect(140, 500, 191, 91))
@@ -419,7 +403,7 @@ class Ui_MainWindow(QObject):
         self.set_path.setStyleSheet(u"background-color: rgb(255, 255, 255)")
         self.path_input = QLineEdit(self.spectrasetup_group)
         self.path_input.setObjectName(u"path_input")
-        self.path_input.setGeometry(QRect(140, 460, 113, 21))
+        self.path_input.setGeometry(QRect(140, 460, 155, 21))
         self.path_input.setStyleSheet(u"background-color: rgb(255, 255, 255)")
         self.label_34 = QLabel(self.spectrasetup_group)
         self.label_34.setObjectName(u"label_34")
@@ -431,6 +415,7 @@ class Ui_MainWindow(QObject):
         self.spectra_group.setFont(font1)
         self.spectra_group.setAutoFillBackground(False)
         self.spectra_group.setStyleSheet(u"background-color: rgb(195, 255, 255)")
+        self.spectra_group.setEnabled(False)
         self.graphicsView_2 = QGraphicsView(self.spectra_group)
         self.graphicsView_2.setObjectName(u"graphicsView_2")
         self.graphicsView_2.setGeometry(QRect(20, 60, 321, 201))
@@ -505,121 +490,45 @@ class Ui_MainWindow(QObject):
         self.path_input.setValidator(validator2)
         self.pmt_input.setValidator(validator1)
 
-        self.retranslateUi(MainWindow)
+        for var, edt in self.input_mapping.items():
+            edt.textChanged.connect(lambda: self.controller.edt_changed(var))
 
+        self.retranslateUi(MainWindow)
         QMetaObject.connectSlotsByName(MainWindow)
 
-        # connect the actual button clicking
-        self.initialize_button.clicked.connect(lambda checked=False: self.on_initialize_clicked())
-        self.close_button.clicked.connect(lambda checked=False: self.on_close_clicked)
-        self.set_gain.clicked.connect(lambda checked=False: self.on_gain_clicked)
-        self.set_range.clicked.connect(lambda checked=False: self.on_range_clicked)
-        self.set_stepsize.clicked.connect(lambda checked=False: self.on_step_size_clicked)
-        self.set_wl_max.clicked.connect(lambda checked=False: self.on_wl_max_clicked)
-        self.set_dwelltime.clicked.connect(lambda checked=False: self.on_dwell_time_clicked)
-        self.set_wlmin.clicked.connect(lambda checked=False: self.on_wl_min_clicked)
-        self.set_filename.clicked.connect(lambda checked=False: self.on_file_name_clicked)
-        self.set_detcorrections.clicked.connect(lambda checked=False: self.on_det_corrections_clicked)
-        self.set_ac.clicked.connect(lambda checked=False: self.on_ac_clicked)
-        self.set_repetitions.clicked.connect(lambda checked=False: self.on_repetitions_clicked)
-        self.set_samplec.clicked.connect(lambda checked=False: self.on_sample_c_clicked)
-        self.set_dc.clicked.connect(lambda checked=False: self.on_dc_clicked)
-        self.start_button.clicked.connect(lambda checked=False: self.on_start_button_clicked)
-        self.stop_button.clicked.connect(lambda checked=False: self.on_stop_button_clicked)
-        self.save_comments.clicked.connect(lambda checked=False: self.on_save_comments_clicked)
-        self.save_notes.clicked.connect(lambda checked=False: self.on_save_notes_clicked)
-        self.set_path.clicked.connect(lambda checked=False: self.on_path_clicked)
-        self.set_pmt.clicked.connect(lambda checked=False: self.on_pmt_clicked)
-        self.set_offset.clicked.connect(lambda checked=False: self.controller.open_cal_dialog)
+    def reset_edt_color(self, var):
+        edt = self.input_mapping[var]
+        edt.setStyleSheet("background-color: white")  # reset to white
+
 
     @pyqtSlot()
-    def open_cal_dialog(self):
-        self.cal_dialog = self.PhaseOffsetCalibrationDialog(self.controller)
-        self.cal_dialog.show()
-
-    @pyqtSlot(dict)
-    def update_plot(self, data):
-        self.ax.clear()  # clear the previous plot
-        self.ax.plot(data['CD'], data['dc'])
-        self.pmt_spectra_view.draw()  # refresh the FigureCanvas
-
-    @pyqtSlot()
-    def on_initialize_clicked(self):
+    def on_initialize_button_clicked(self):
         self.initializeClicked.emit()
 
     @pyqtSlot()
-    def on_close_clicked(self):
+    def on_close_button_clicked(self):
         self.closeClicked.emit()
 
     @pyqtSlot()
-    def on_gain_clicked(self):
+    def on_set_gain_clicked(self):
         gain_text = self.gain_input.text()
         gain_value = float(gain_text) if gain_text else 0.0
         self.gainClicked.emit(gain_value)
+        self.gain_input.setStyleSheet("background-color: white")  # reset color
 
     @pyqtSlot()
-    def on_offset_clicked(self):
+    def on_set_offset_clicked(self):
         offset_text = self.offset_input.text()
         offset_value = float(offset_text) if offset_text else 0.0
         self.offsetClicked.emit(offset_value)
+        self.offset_input.setStyleSheet("background-color: white")  # reset color
 
     @pyqtSlot()
-    def on_range_clicked(self):
+    def on_set_range_clicked(self):
         range_text = self.range_input.text()
         range_value = float(range_text) if range_text else 0.0
         self.rangeClicked.emit(range_value)
-
-    @pyqtSlot()
-    def on_step_size_clicked(self):
-        stepsize_text = self.stepsize_input.text()
-        stepsize_value = float(stepsize_text) if stepsize_text else 0.0
-        self.stepsizeClicked.emit(stepsize_value)
-
-    @pyqtSlot()
-    def on_wl_max_clicked(self):
-        wlmax_text = self.wl_max.text()
-        wlmax_value = float(wlmax_text) if wlmax_text else 0.0
-        self.wlmaxClicked.emit(wlmax_value)
-
-    @pyqtSlot()
-    def on_dwell_time_clicked(self):
-        dwelltime_text = self.dwelltime_input.text()
-        dwelltime_value = float(dwelltime_text) if dwelltime_text else 0.0
-        self.dwelltimeClicked(dwelltime_value)
-
-    @pyqtSlot()
-    def on_wl_min_clicked(self):
-        wlmin_text = self.wl_min.text()
-        wlmin_value = float(wlmin_text) if wlmin_text else 0.0
-        self.wlminClicked(wlmin_value)
-
-    @pyqtSlot()
-    def on_file_name_clicked(self):
-        self.filenameClicked.emit()
-
-    @pyqtSlot()
-    def on_det_corrections_clicked(self):
-        self.detcorrectionsClicked.emit()
-
-    @pyqtSlot()
-    def on_ac_clicked(self):
-        self.acClicked.emit()
-
-    @pyqtSlot()
-    def on_repetitions_clicked(self):
-        repet_text = self.repetitions_input.text()
-        repet_value = float(repet_text) if repet_text else 0.0
-        self.repetitionsClicked.emit(repet_value)
-
-    @pyqtSlot()
-    def on_sample_c_clicked(self):
-        samplec_text = self.samplec_input.text()
-        samplec_value = float(samplec_text) if samplec_text else 0.0
-        self.mfli.set_samplec(samplec_value)
-
-    @pyqtSlot()
-    def on_dc_clicked(self):
-        self.dcClicked.emit()
+        self.range_input.setStyleSheet("background-color: white")  # reset color
 
     @pyqtSlot()
     def on_start_button_clicked(self):
@@ -634,26 +543,34 @@ class Ui_MainWindow(QObject):
         comments_text = self.comments_input.text()
         comments_value = str(comments_text) if comments_text else "no comments"
         self.savecommentsClicked.emit(comments_value)
-
-    def on_save_notes_clicked(self):
-        notes_text = self.notes_input.text()
-        notes_value = str(notes_text) if notes_text else ("")
-        self.savenotesClicked.emit(notes_value)
+        self.comments_input.setStyleSheet("background-color: white")  # reset color
 
     @pyqtSlot()
-    def on_path_clicked(self):
-        path_text = self.path_input.text()
-        path_value = float(path_text) if path_text else 0.0
-        self.pathClicked.emit(path_value)
+    def on_set_wavelength_clicked(self):
+        wavelength_text = self.wavelength_input.text()
+        wavelength_value = float(wavelength_text) if wavelength_text else 0.0
+        self.setwavelengthClicked.emit(wavelength_value)
+        self.wavelength_input.setStyleSheet("background-color: white")  # reset color
 
     @pyqtSlot()
-    def on_pmt_clicked(self):
+    def on_set_pmt_clicked(self):
         pmt_text = self.pmt_input.text()
         pmt_value = float(pmt_text) if pmt_text else 0.0
-        self.pathClicked.emit(pmt_value)
+        self.setpmtClicked.emit(pmt_value)
+        self.pmt_input.setStyleSheet("background-color: white")  # reset color
 
-    # setupUi
-    # setupUi
+    @pyqtSlot()
+    def open_cal_dialog(self):
+        self.cal_dialog = self.PhaseOffsetCalibrationDialog(self.controller)
+        self.cal_dialog.show()
+
+    @pyqtSlot(dict)
+    def update_plot(self, data):
+        self.ax.clear()  # clear the previous plot
+        self.ax.plot(data['CD'], data['dc'])
+        self.pmt_spectra_view.draw()  # refresh the FigureCanvas
+
+    # setupUii
 
     def retranslateUi(self, MainWindow):
         MainWindow.setWindowTitle(QCoreApplication.translate("MainWindow", u"MainWindow", None))
@@ -673,17 +590,17 @@ class Ui_MainWindow(QObject):
         self.label_10.setText(QCoreApplication.translate("MainWindow", u"Avg Voltage :", None))
         self.label_11.setText(QCoreApplication.translate("MainWindow", u"PMT Input :", None))
         self.label_12.setText(QCoreApplication.translate("MainWindow", u"Approx gain :", None))
-        self.label_13.setText(QCoreApplication.translate("MainWindow", u"Phase Offset :", None))
+        self.label_13.setText(QCoreApplication.translate("MainWindow", u"Wavelength:", None))
         self.label_15.setText(QCoreApplication.translate("MainWindow", u"Range :", None))
         self.peak_voltagetext.setText(QCoreApplication.translate("MainWindow", u"peak_voltage", None))
         self.avg_voltagetext.setText(QCoreApplication.translate("MainWindow", u"avg_voltage", None))
         self.set_pmt.setText(QCoreApplication.translate("MainWindow", u"Set", None))
-        self.save_notes.setText(QCoreApplication.translate("MainWindow", u"Save", None))
-        self.label_26.setText(QCoreApplication.translate("MainWindow", u"Notes :", None))
+        self.label_26.setText(QCoreApplication.translate("MainWindow", u"Phase Offset:", None))
         self.set_gain.setText(QCoreApplication.translate("MainWindow", u"Set", None))
-        self.set_offset.setText(QCoreApplication.translate("MainWindow", u"Set", None))
+        self.set_wavelength.setText(QCoreApplication.translate("MainWindow", u"Set", None))
         self.set_range.setText(QCoreApplication.translate("MainWindow", u"Set", None))
-        self.notes_input.setPlainText("")
+        self.set_offset.setText(QCoreApplication.translate("MainWindow", u"Set", None))
+        self.calibrate.setText(QCoreApplication.translate("MainWindow", u"Calibrate Phase Offset", None))
         self.spectrasetup_group.setTitle(QCoreApplication.translate("MainWindow", u"Spectra Setup", None))
         self.set_stepsize.setText(QCoreApplication.translate("MainWindow", u"Set", None))
         self.label_14.setText(QCoreApplication.translate("MainWindow", u"Step size (nm):*", None))
@@ -719,4 +636,5 @@ class Ui_MainWindow(QObject):
         self.label_32.setText(QCoreApplication.translate("MainWindow", u"CD", None))
         self.debug_group.setTitle(QCoreApplication.translate("MainWindow", u"Debug log", None))
         self.debug_input.setPlainText(QCoreApplication.translate("MainWindow", u"Debug goes here", None))
+# retranslateUi
     # retranslateUi
