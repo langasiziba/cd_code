@@ -118,6 +118,11 @@ class Controller(QMainWindow):
         self.log_author_message()
         self.update_log()
 
+        self.data_for_cdgraph = []
+        self.data_for_g_absgraph = []
+        self.data_for_molar_ellipsgraph = []
+        self.data_for_ldgraph = []
+
         # gui portion of updating log
         self.log_timer = QTimer()
         self.log_timer.timeout.connect(self.update_log)
@@ -421,6 +426,270 @@ class Controller(QMainWindow):
 
     def update_osc_plots(self, max_vals):
         self.gui.plot_osc(data_max=max_vals, max_len=self.max_volt_hist_length, time_step=self.osc_refresh_delay)
+
+    def get_data_for_cdgraph(self):
+        # You would replace this with the actual method to acquire the data
+        return self.data_for_cdgraph
+
+    def get_data_for_g_absgraph(self):
+        # You would replace this with the actual method to acquire the data
+        return self.data_for_g_absgraph
+
+    def get_data_for_molar_ellipsgraph(self):
+        # You would replace this with the actual method to acquire the data
+        return self.data_for_molar_ellipsgraph
+
+    def get_data_for_ldgraph(self):
+        # You would replace this with the actual method to acquire the data
+        return self.data_for_ldgraph
+
+        # ---Start of spectra acquisition section---
+
+    def start_spec(self):
+
+        # this checks if the filename of the spectra exist or not
+        def filename_exists_or_empty(name: str) -> bool:
+            if name == '':
+                return True
+            else:
+                return os.path.exists(".\\data\\" + name + ".csv")
+
+        def check_illegal_chars(s):
+            result = False
+            for c in s:
+                if c in '#@$%^&*{}:;"|<>/?\`~' + "'":
+                    result = True
+                    break
+            return result
+
+        # acquire the settings from the user
+        ac_blank = self.gui.edt_ac_blank.text()
+        dc_blank = self.gui.edt_dc_blank.text()
+        det_corr = self.gui.edt_det_corr.text()
+        filename = self.gui.edt_filename.text()
+        reps = int(self.gui.edt_rep.text())
+
+        ac_blank_exists = filename_exists_or_empty(ac_blank)
+        dc_blank_exists = filename_exists_or_empty(dc_blank)
+        det_corr_exists = filename_exists_or_empty(det_corr)
+
+        if not check_illegal_chars(filename):
+            try:
+                # For averaged measurements add the suffix of the first scan for the filename check
+                if reps == 1:
+                    s = ''
+                else:
+                    s = '_1'
+                filename_exists = filename_exists_or_empty(filename + s)
+
+                error = not ac_blank_exists or not dc_blank_exists or not det_corr_exists or filename_exists
+
+                if not error:
+                    self.stop_spec_trigger[0] = False
+
+                    self.set_acquisition_running(True)
+
+                    self.spec_thread = th.Thread(target=self.record_spec, args=(
+                        float(self.gui.edt_start.get()),
+                        float(self.gui.edt_end.get()),
+                        float(self.gui.edt_step.get()),
+                        float(self.gui.edt_dwell.get()),
+                        reps,
+                        filename,
+                        ac_blank,
+                        dc_blank,
+                        det_corr,
+                        self.gui.var_pem_off.get()))
+                    self.spec_thread.start()
+                    self.update_spec()
+                else:
+                    if not ac_blank_exists:
+                        self.log('Error: AC-blank file does not exist!', True)
+                    if not dc_blank_exists:
+                        self.log('Error: DC-blank file does not exist!', True)
+                    if not det_corr_exists:
+                        self.log('Error: Detector correction file does not exist!', True)
+                    if filename_exists:
+                        self.log('Error: Spectra filename {} already exists!'.format(filename + s), True)
+            except Exception as e:
+                self.log('Error in click_start_spec: ' + str(e), True)
+        else:
+            self.log('Error: Filename contains one of these illegal characters: ' + '#@$%^&*{}:;"|<>/?\`~' + "'")
+
+        # will be executed in separate thread
+
+    def record_spec(self, start_nm: float, end_nm: float, step: float, dwell_time: float, reps: int, filename: str,
+                    ac_blank: str, dc_blank: str, det_corr: str, pem_off: int):
+
+        def check_lp_theta_std(lp: float) -> bool:
+            if lp < self.lp_theta_std_warning_threshold:
+                self.log(
+                    'Warning: Possibly linearly polarized emisssion at {:.2f} (lp_theta_std = {:.3f})!'.format(curr_nm,
+                                                                                                               lp),
+                    False)
+                return True
+            else:
+                return False
+
+        # try:
+        self.log('')
+        self.log('Spectra acquisition: {:.2f} to {:.2f} nm with {:.2f} nm steps and {:.3f} s per step'.format(start_nm,
+                                                                                                              end_nm,
+                                                                                                              step,
+                                                                                                              dwell_time))
+
+        self.log('Starting data acquisition.')
+
+        self.lockin_daq_lock.acquire()
+        self.lockin_daq.set_dwell_time(dwell_time)
+        self.lockin_daq_lock.release()
+
+        # wait for MFLI buffer to be ready
+        self.interruptable_sleep(dwell_time)
+
+        # array of pandas dataframes with all spectral data
+        dfall_spectra = np.empty(reps, dtype=object)
+        # avg_spec is used to display the averaged spectrum during the measurement
+        self.avg_spec = np.array([[],  # wavelength
+                                  [],  # DC
+                                  [],  # AC
+                                  []])  # glum
+
+        correction = ac_blank != '' or dc_blank != '' or det_corr != ''
+
+        if start_nm > end_nm:
+            inc = -step
+        else:
+            inc = step
+        direction = np.sign(inc)
+
+        self.update_progress_txt(0, 1, 0, 1, reps, 0)
+
+        # Disable PEM for AC background measurement
+        self.set_modulation_active(pem_off == 0)
+
+        time_since_start = -1.0
+        t0 = time.time()
+
+        i = 0
+        while (i < reps) and not self.stop_spec_trigger[0]:
+            self.log('')
+            self.log('Run {}/{}'.format(i + 1, reps))
+
+            lp_detected = False
+
+            self.curr_spec = np.array([[],  # wavelenght
+                                       [],  # AC
+                                       [],  # AC stddev
+                                       [],  # DC
+                                       [],  # DC stddev
+                                       [],  # I_L
+                                       [],  # I_L stddev
+                                       [],  # I_R
+                                       [],  # I_R stddev
+                                       [],  # glum
+                                       [],  # glum stddev
+                                       [],  # lp_r
+                                       [],  # lp_r stddev
+                                       [],  # lp theta
+                                       [],  # lp theta stddev
+                                       [],  # lp
+                                       []])  # lp stddev
+
+            # self.log('start {}'.format(time.time()-t0))
+            curr_nm = start_nm - inc
+            while ((((direction > 0) and (curr_nm < end_nm)) or ((direction < 0) and (curr_nm > end_nm)))
+                   and not self.stop_spec_trigger[0]):
+
+                curr_nm = curr_nm + inc
+                # self.log('before move {:.3f}'.format(time.time()-t0))
+                self.move_nm(curr_nm, pem_off == 0)
+                # self.log('after move {:.3f}'.format(time.time()-t0))
+
+                self.interruptable_sleep(self.lowpass_filter_risetime)
+                # self.log('afer risetime {:.3f}'.format(time.time()-t0))
+
+                # try three times to get a successful measurement
+                j = 0
+                success = False
+                # Try 5 times to get a valid dataset from the MFLI
+                while (j < 5) and not success and not self.stop_spec_trigger[0]:
+                    # self.log('before acquire {:.3f}'.format(time.time()-t0))
+                    self.lockin_daq_lock.acquire()
+                    # self.log('afer lock {:.3f}'.format(time.time()-t0))
+                    data = self.lockin_daq.read_data(self.stop_spec_trigger)
+                    # self.log('after read {:.3f}'.format(time.time()-t0))
+                    self.lockin_daq_lock.release()
+
+                    if not self.stop_spec_trigger[0]:
+                        # Check if there is a linearly polarized component (2f) in the signal
+                        lp_detected = lp_detected or check_lp_theta_std(data['data'][self.index_lp_theta])
+                        # self.log('afeter release {:.3f}'.format(time.time()-t0))
+                        success = data['success']
+                    j += 1
+
+                if not success and not self.stop_spec_trigger[0]:
+                    self.stop_spec_trigger[0] = True
+                    self.log('Could not collect data after 5 tries, aborting...', True)
+
+                if not self.stop_spec_trigger[0]:
+                    # add current wavelength to dataset
+                    data_with_WL = np.array([np.concatenate(([curr_nm], data['data']))])
+                    # add dataset to current spectrum
+                    self.curr_spec = np.hstack((self.curr_spec, data_with_WL.T))
+                    if reps > 1:
+                        self.add_data_to_avg_spec(data_with_WL, i)
+
+                time_since_start = time.time() - t0
+                self.update_progress_txt(start_nm, end_nm, curr_nm, i + 1, reps, time_since_start)
+                # self.log('before next step {:.3f}'.format(time.time()-t0))
+
+            if self.stop_spec_trigger[0]:
+                self.set_PMT_voltage(0.0)
+
+            self.log('This scan took {:.0f} s.'.format(time_since_start))
+
+            # process spectra as dataframes (df)
+            dfcurr_spec = self.np_to_pd(self.curr_spec)
+            if reps > 1:
+                index_str = '_' + str(i + 1)
+            else:
+                index_str = ''
+            self.save_spec(dfcurr_spec, filename + index_str)
+
+            if correction:
+                dfcurr_spec_corr = self.apply_corr(dfcurr_spec, ac_blank, dc_blank, det_corr)
+                self.save_spec(dfcurr_spec_corr, filename + index_str + '_corr', False)
+
+            dfall_spectra[i] = dfcurr_spec
+
+            if lp_detected:
+                self.log('')
+                self.log('Warning: Possibly linearly polarized emission!', True)
+
+            i += 1
+
+        self.log('Stopping data acquisition.')
+        self.set_acquisition_running(False)
+
+        # averaging and correction of the averaged spectrum
+        if reps > 1 and not self.stop_spec_trigger[0]:
+            dfavg_spec = self.df_average_spectra(dfall_spectra)
+            self.save_spec(dfavg_spec, filename + '_avg', False)
+
+            if correction:
+                dfavg_spec_corr = self.apply_corr(dfavg_spec_recalc, ac_blank, dc_blank, det_corr)
+                self.save_spec(dfavg_spec_corr, filename + '_avg_corr', False)
+
+        self.log('')
+        self.log('Returning to start wavelength')
+        self.set_modulation_active(True)
+        self.move_nm(start_nm, move_pem=True)
+
+        self.stop_spec_trigger[0] = False
+        # except Exception as e:
+        # self.log("Error in record_spec: {}".format(str(e)))
+
 
     def open_cal_dialog(self):
         self.cal_dialog = PhaseOffsetCalibrationDialog(self)

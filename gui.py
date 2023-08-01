@@ -3,15 +3,16 @@ import queue
 from PyQt5.QtCore import (QCoreApplication, QMetaObject, QRect,
                           Qt, pyqtSignal, pyqtSlot, QObject, QTimer)
 from PyQt5.QtGui import (QCursor, QFont, QDoubleValidator)
-from PyQt5.QtWidgets import (QGraphicsView, QGroupBox, QLabel,
+from PyQt5.QtWidgets import (QGroupBox, QLabel,
                              QLineEdit, QPlainTextEdit, QProgressBar,
-                             QPushButton, QSizePolicy, QStatusBar, QWidget, QVBoxLayout, QComboBox)
+                             QSizePolicy, QStatusBar, QWidget, QVBoxLayout, QComboBox)
+from PyQt5.QtWidgets import QPushButton
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
-from PyQt5.QtWidgets import QApplication, QMainWindow, QPushButton
-from controller import Controller, PhaseOffsetCalibrationDialog
 
+from controller import Controller, PhaseOffsetCalibrationDialog
 from mfli import MFLI
+
 
 class MyProgressBar(QProgressBar):
     def __init__(self, parent=None):
@@ -65,6 +66,10 @@ class Ui_MainWindow(QObject):
             "edt_phaseoffset": self.offset_input
         }
         self.close_button.clicked.connect(self.close)
+
+        self.timer = QTimer()
+        self.timer.timeout.connect(self.update_plots)
+        self.timer.start(1000)  # update every 1000 ms (1 second)
 
     def set_text(self, edt, text):
         # Find the QLineEdit instance by name
@@ -500,6 +505,31 @@ class Ui_MainWindow(QObject):
         self.range_input.currentIndexChanged.connect(self.on_range_input_changed)
         self.retranslateUi(MainWindow)
         QMetaObject.connectSlotsByName(MainWindow)
+
+    def update_plots(self):
+        # Get updated data from the controller.
+        cdgraph_data = self.controller.get_data_for_cdgraph()
+        g_absgraph_data = self.controller.get_data_for_g_absgraph()
+        molar_ellipsgraph_data = self.controller.get_data_for_molar_ellipsgraph()
+        ldgraph_data = self.controller.get_data_for_ldgraph()
+
+        # Update the plots.
+        self.graphicsView_2.figure.clear()
+        self.graphicsView_2.figure.add_subplot(111).plot(cdgraph_data)
+        self.graphicsView_2.canvas.draw()
+
+        self.graphicsView_3.figure.clear()
+        self.graphicsView_3.figure.add_subplot(111).plot(g_absgraph_data)
+        self.graphicsView_3.canvas.draw()
+
+        self.graphicsView_4.figure.clear()
+        self.graphicsView_4.figure.add_subplot(111).plot(molar_ellipsgraph_data)
+        self.graphicsView_4.canvas.draw()
+
+        self.graphicsView_5.figure.clear()
+        self.graphicsView_5.figure.add_subplot(111).plot(ldgraph_data)
+        self.graphicsView_5.canvas.draw()
+
 
     def reset_edt_color(self, var):
         edt = self.input_mapping[var]
