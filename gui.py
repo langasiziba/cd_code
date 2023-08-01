@@ -5,13 +5,16 @@ from PyQt5.QtCore import (QCoreApplication, QMetaObject, QRect,
 from PyQt5.QtGui import (QCursor, QFont, QDoubleValidator)
 from PyQt5.QtWidgets import (QGroupBox, QLabel,
                              QLineEdit, QPlainTextEdit, QProgressBar,
-                             QSizePolicy, QStatusBar, QWidget, QVBoxLayout, QComboBox)
+                             QSizePolicy, QStatusBar, QWidget, QVBoxLayout, QComboBox, QMessageBox)
 from PyQt5.QtWidgets import QPushButton
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
 
-from controller import Controller, PhaseOffsetCalibrationDialog
+import controller
 from mfli import MFLI
+from debug import LogObject
+
+
 
 
 class MyProgressBar(QProgressBar):
@@ -35,41 +38,40 @@ class Ui_MainWindow(QObject):
     savecommentsClicked = pyqtSignal()
     setwavelengthClicked = pyqtSignal()
     rangeChosen = pyqtSignal()
-    calibrateClicked = pyqtSignal
+    calibrateClicked = pyqtSignal()
+    values_changed = pyqtSignal(int, float, float, float, float, str, str, str, str, int)
+    update_max_voltage_signal = pyqtSignal(float)
+    update_avg_voltage_signal = pyqtSignal(float)
+    handle_range_limit_reached_signal = pyqtSignal()
+    handle_pmt_limit_reached_signal = pyqtSignal()
+    closing = pyqtSignal()
+
 
     def __init__(self):
         super().__init__()
+        self.oscilloscope_thread = None
         log_queue = queue.Queue()
         self.mfli = MFLI(ID="dev7024", logname="mfli_log", log_queue=log_queue)
-        self.controller = Controller()
-        self.PhaseOffsetCalibrationDialog = PhaseOffsetCalibrationDialog(self.controller)
+        self.controller = controller.Controller()
+        self.PhaseOffsetCalibrationDialog = controller.PhaseOffsetCalibrationDialog(self.controller)
         self.edits_map = {
-            "edt_filename": self.filename_input,
-            "edt_start": self.wl_min,
-            "edt_end": self.wl_max,
-            "edt_step": self.stepsize_input,
-            "edt_dwell": self.dwelltime_input,
-            "edt_rep": self.repetitions_input,
-            "edt_excWL": self.wavelength_input,
-            "edt_comment": self.comments_input,
-            "edt_ac_blank": self.ac_input,
-            "edt_phaseoffset": self.offset_input,
-            "edt_dc_blank": self.dc_input,
-            "edt_det_corr": self.detcorrection_input,
+            "edt_det_corr": self.edt_det_corr,
+            "edt_debug_log": self.debug_input
         }
 
         self.input_mapping = {
             "edt_pmt": self.pmt_input,
-            "edt_range": self.range_input,
             "edt_gain": self.gain_input,
-            "edt_excWL": self.wavelength_input,
-            "edt_phaseoffset": self.offset_input
         }
+        # To call on_closing when the window is closing
+        self.closeEvent = self.on_closing
         self.close_button.clicked.connect(self.close)
 
         self.timer = QTimer()
         self.timer.timeout.connect(self.update_plots)
         self.timer.start(1000)  # update every 1000 ms (1 second)
+        self.myLogger = LogObject('MyLogger')
+
 
     def set_text(self, edt, text):
         # Find the QLineEdit instance by name
@@ -234,32 +236,32 @@ class Ui_MainWindow(QObject):
         self.pmt_input.setObjectName(u"pmt_input")
         self.pmt_input.setGeometry(QRect(110, 290, 113, 21))
         self.pmt_input.setStyleSheet(u"background-color: rgb(255, 255, 255)")
-        self.range_input = QComboBox(self.signaltuning_group)
-        self.range_input.setObjectName(u"range_input")
-        self.range_input.setGeometry(QRect(110, 410, 113, 21))
+        self.cbx_range = QComboBox(self.signaltuning_group)
+        self.cbx_range.setObjectName(u"cbx_range")
+        self.cbx_range.setGeometry(QRect(110, 410, 113, 21))
         # add items to the combo box
-        self.range_input.addItem("0.001")
-        self.range_input.addItem("0.003")
-        self.range_input.addItem("1.0")
-        self.range_input.addItem("1.0")
+        self.cbx_range.addItem("0.001")
+        self.cbx_range.addItem("0.003")
+        self.cbx_range.addItem("1.0")
+        self.cbx_range.addItem("3.0")
 
         self.gain_input = QLineEdit(self.signaltuning_group)
         self.gain_input.setObjectName(u"gain_input")
         self.gain_input.setGeometry(QRect(110, 330, 113, 21))
         self.gain_input.setStyleSheet(u"background-color: rgb(255, 255, 255)")
-        self.wavelength_input = QLineEdit(self.signaltuning_group)
-        self.wavelength_input.setObjectName(u"wavelength_input")
-        self.wavelength_input.setGeometry(QRect(110, 370, 113, 21))
-        self.wavelength_input.setStyleSheet(u"background-color: rgb(255, 255, 255)")
+        self.edt_excWL = QLineEdit(self.signaltuning_group)
+        self.edt_excWL.setObjectName(u"edt_excWL")
+        self.edt_excWL.setGeometry(QRect(110, 370, 113, 21))
+        self.edt_excWL.setStyleSheet(u"background-color: rgb(255, 255, 255)")
         self.set_range = QPushButton(self.signaltuning_group)
         self.set_range.setObjectName(u"set_range")
         self.set_range.setGeometry(QRect(250, 410, 51, 24))
         self.set_range.setFont(font4)
         self.set_range.setStyleSheet(u"background-color: rgb(255, 255, 255)")
-        self.offset_input = QLineEdit(self.signaltuning_group)
-        self.offset_input.setObjectName(u"offset_input")
-        self.offset_input.setGeometry(QRect(110, 450, 113, 21))
-        self.offset_input.setStyleSheet(u"background-color: rgb(255, 255, 255)")
+        self.edt_phaseoffset = QLineEdit(self.signaltuning_group)
+        self.edt_phaseoffset.setObjectName(u"edt_phaseoffset")
+        self.edt_phaseoffset.setGeometry(QRect(110, 450, 113, 21))
+        self.edt_phaseoffset.setStyleSheet(u"background-color: rgb(255, 255, 255)")
         self.set_offset = QPushButton(self.signaltuning_group)
         self.set_offset.setObjectName(u"set_offset")
         self.set_offset.setGeometry(QRect(250, 450, 51, 24))
@@ -284,12 +286,12 @@ class Ui_MainWindow(QObject):
         self.label_26.raise_()
         self.set_gain.raise_()
         self.set_wavelength.raise_()
-        self.range_input.raise_()
+        self.cbx_range.raise_()
         self.gain_input.raise_()
-        self.wavelength_input.raise_()
+        self.edt_excWL.raise_()
         self.set_range.raise_()
         self.pmt_input.raise_()
-        self.offset_input.raise_()
+        self.edt_phaseoffset.raise_()
         self.set_offset.raise_()
         self.calibrate.raise_()
         self.spectrasetup_group = QGroupBox(self.centralwidget)
@@ -300,26 +302,30 @@ class Ui_MainWindow(QObject):
         self.spectrasetup_group.setStyleSheet(u"background-color: rgb(195, 235, 255)")
         self.spectrasetup_group.setEnabled(False)
 
-        self.wl_min = QLineEdit(self.spectrasetup_group)
-        self.wl_min.setObjectName(u"wl_min")
-        self.wl_min.setGeometry(QRect(140, 60, 155, 21))
-        self.wl_min.setStyleSheet(u"background-color: rgb(255, 255, 255)")
+        self.var_pem_off = QCheckBox(self.spectrasetup_group)
+        self.var_pem_off.setObjectName(u"var_pem_off")
+        self.var_pem_off.setGeometry(QRect(140,460,121,16))
+
+        self.edt_start = QLineEdit(self.spectrasetup_group)
+        self.edt_start.setObjectName(u"edt_start")
+        self.edt_start.setGeometry(QRect(140, 60, 155, 21))
+        self.edt_start.setStyleSheet(u"background-color: rgb(255, 255, 255)")
         self.label_14 = QLabel(self.spectrasetup_group)
         self.label_14.setObjectName(u"label_14")
         self.label_14.setGeometry(QRect(20, 140, 111, 16))
         self.label_14.setFont(font3)
-        self.dwelltime_input = QLineEdit(self.spectrasetup_group)
-        self.dwelltime_input.setObjectName(u"dwelltime_input")
-        self.dwelltime_input.setGeometry(QRect(140, 180, 155, 21))
-        self.dwelltime_input.setStyleSheet(u"background-color: rgb(255, 255, 255)")
-        self.wl_max = QLineEdit(self.spectrasetup_group)
-        self.wl_max.setObjectName(u"wl_max")
-        self.wl_max.setGeometry(QRect(140, 100, 155, 21))
-        self.wl_max.setStyleSheet(u"background-color: rgb(255, 255, 255)")
-        self.stepsize_input = QLineEdit(self.spectrasetup_group)
-        self.stepsize_input.setObjectName(u"stepsize_input")
-        self.stepsize_input.setGeometry(QRect(140, 140, 155, 21))
-        self.stepsize_input.setStyleSheet(u"background-color: rgb(255, 255, 255)")
+        self.edt_dwell = QLineEdit(self.spectrasetup_group)
+        self.edt_dwell.setObjectName(u"edt_dwell")
+        self.edt_dwell.setGeometry(QRect(140, 180, 155, 21))
+        self.edt_dwell.setStyleSheet(u"background-color: rgb(255, 255, 255)")
+        self.edt_end = QLineEdit(self.spectrasetup_group)
+        self.edt_end.setObjectName(u"edt_end")
+        self.edt_end.setGeometry(QRect(140, 100, 155, 21))
+        self.edt_end.setStyleSheet(u"background-color: rgb(255, 255, 255)")
+        self.edt_step = QLineEdit(self.spectrasetup_group)
+        self.edt_step.setObjectName(u"edt_step")
+        self.edt_step.setGeometry(QRect(140, 140, 155, 21))
+        self.edt_step.setStyleSheet(u"background-color: rgb(255, 255, 255)")
         self.label_18 = QLabel(self.spectrasetup_group)
         self.label_18.setObjectName(u"label_18")
         self.label_18.setGeometry(QRect(20, 180, 81, 16))
@@ -332,26 +338,26 @@ class Ui_MainWindow(QObject):
         self.label_20.setObjectName(u"label_20")
         self.label_20.setGeometry(QRect(20, 100, 91, 16))
         self.label_20.setFont(font3)
-        self.repetitions_input = QLineEdit(self.spectrasetup_group)
-        self.repetitions_input.setObjectName(u"repetitions_input")
-        self.repetitions_input.setGeometry(QRect(140, 220, 155, 21))
-        self.repetitions_input.setStyleSheet(u"background-color: rgb(255, 255, 255)")
+        self.edt_rep = QLineEdit(self.spectrasetup_group)
+        self.edt_rep.setObjectName(u"edt_rep")
+        self.edt_rep.setGeometry(QRect(140, 220, 155, 21))
+        self.edt_rep.setStyleSheet(u"background-color: rgb(255, 255, 255)")
         self.label_21 = QLabel(self.spectrasetup_group)
         self.label_21.setObjectName(u"label_21")
         self.label_21.setGeometry(QRect(20, 300, 81, 16))
         self.label_21.setFont(font3)
-        self.ac_input = QLineEdit(self.spectrasetup_group)
-        self.ac_input.setObjectName(u"ac_input")
-        self.ac_input.setGeometry(QRect(140, 340, 155, 21))
-        self.ac_input.setStyleSheet(u"background-color: rgb(255, 255, 255)")
-        self.detcorrection_input = QLineEdit(self.spectrasetup_group)
-        self.detcorrection_input.setObjectName(u"detcorrection_input")
-        self.detcorrection_input.setGeometry(QRect(140, 260, 155, 21))
-        self.detcorrection_input.setStyleSheet(u"background-color: rgb(255, 255, 255)")
-        self.filename_input = QLineEdit(self.spectrasetup_group)
-        self.filename_input.setObjectName(u"filename_input")
-        self.filename_input.setGeometry(QRect(140, 300, 155, 21))
-        self.filename_input.setStyleSheet(u"background-color: rgb(255, 255, 255)")
+        self.edt_ac_blank = QLineEdit(self.spectrasetup_group)
+        self.edt_ac_blank.setObjectName(u"edt_ac_blank")
+        self.edt_ac_blank.setGeometry(QRect(140, 340, 155, 21))
+        self.edt_ac_blank.setStyleSheet(u"background-color: rgb(255, 255, 255)")
+        self.edt_det_corr = QLineEdit(self.spectrasetup_group)
+        self.edt_det_corr.setObjectName(u"edt_det_corr")
+        self.edt_det_corr.setGeometry(QRect(140, 260, 155, 21))
+        self.edt_det_corr.setStyleSheet(u"background-color: rgb(255, 255, 255)")
+        self.edt_filename = QLineEdit(self.spectrasetup_group)
+        self.edt_filename.setObjectName(u"edt_filename")
+        self.edt_filename.setGeometry(QRect(140, 300, 155, 21))
+        self.edt_filename.setStyleSheet(u"background-color: rgb(255, 255, 255)")
         self.label_22 = QLabel(self.spectrasetup_group)
         self.label_22.setObjectName(u"label_22")
         self.label_22.setGeometry(QRect(20, 340, 101, 16))
@@ -364,10 +370,10 @@ class Ui_MainWindow(QObject):
         self.label_24.setObjectName(u"label_24")
         self.label_24.setGeometry(QRect(20, 260, 111, 16))
         self.label_24.setFont(font3)
-        self.dc_input = QLineEdit(self.spectrasetup_group)
-        self.dc_input.setObjectName(u"dc_input")
-        self.dc_input.setGeometry(QRect(140, 380, 155, 21))
-        self.dc_input.setStyleSheet(u"background-color: rgb(255, 255, 255)")
+        self.edt_dc_blank = QLineEdit(self.spectrasetup_group)
+        self.edt_dc_blank.setObjectName(u"edt_dc_blank")
+        self.edt_dc_blank.setGeometry(QRect(140, 380, 155, 21))
+        self.edt_dc_blank.setStyleSheet(u"background-color: rgb(255, 255, 255)")
         self.label_25 = QLabel(self.spectrasetup_group)
         self.label_25.setObjectName(u"label_25")
         self.label_25.setGeometry(QRect(20, 500, 81, 16))
@@ -384,11 +390,11 @@ class Ui_MainWindow(QObject):
         self.label_28.setObjectName(u"label_28")
         self.label_28.setGeometry(QRect(20, 420, 121, 16))
         self.label_28.setFont(font3)
-        self.comments_input = QPlainTextEdit(self.spectrasetup_group)
-        self.comments_input.setObjectName(u"comments_input")
-        self.comments_input.setGeometry(QRect(140, 500, 191, 91))
-        self.comments_input.setFont(font2)
-        self.comments_input.setStyleSheet(u"background-color: rgb(255, 255, 255)")
+        self.edt_comment = QPlainTextEdit(self.spectrasetup_group)
+        self.edt_comment.setObjectName(u"edt_comment")
+        self.edt_comment.setGeometry(QRect(140, 500, 191, 91))
+        self.edt_comment.setFont(font2)
+        self.edt_comment.setStyleSheet(u"background-color: rgb(255, 255, 255)")
         self.start_button = QPushButton(self.spectrasetup_group)
         self.start_button.setObjectName(u"start_button")
         self.start_button.setGeometry(QRect(100, 720, 81, 31))
@@ -487,24 +493,36 @@ class Ui_MainWindow(QObject):
         validator2 = QDoubleValidator()
         validator0.setDecimals(2)
 
-        self.wl_min.setValidator(validator2)
-        self.wl_max.setValidator(validator2)
-        self.dwelltime_input.setValidator(validator1)
-        self.stepsize_input.setValidator(validator0)
+        self.edt_start.setValidator(validator2)
+        self.edt_end.setValidator(validator2)
+        self.edt_dwell.setValidator(validator1)
+        self.edt_step.setValidator(validator0)
         self.gain_input.setValidator(validator2)
-        self.offset_input.setValidator(validator2)
-        self.range_input.setValidator(validator2)
-        self.repetitions_input.setValidator(validator0)
+        self.edt_phaseoffset.setValidator(validator2)
+        self.cbx_range.setValidator(validator2)
+        self.edt_rep.setValidator(validator0)
         self.samplec_input.setValidator(validator2)
         self.path_input.setValidator(validator2)
         self.pmt_input.setValidator(validator1)
+        self.myLogger.log_signal.connect(self.handleLogSignal)
+
 
         for var, edt in self.input_mapping.items():
             edt.textChanged.connect(lambda: self.controller.edt_changed(var))
 
-        self.range_input.currentIndexChanged.connect(self.on_range_input_changed)
+        self.cbx_range.currentIndexChanged.connect(self.on_cbx_range_changed)
         self.retranslateUi(MainWindow)
+        self.oscilloscope_thread = controller.OscilloscopeThread(self.controller)
+        self.oscilloscope_thread.update_max_voltage_signal.connect(self.update_max_voltage)
+        self.oscilloscope_thread.update_avg_voltage_signal.connect(self.update_avg_voltage)
+        self.oscilloscope_thread.handle_range_limit_reached_signal.connect(self.handle_range_limit_reached)
+        self.oscilloscope_thread.handle_pmt_limit_reached_signal.connect(self.handle_pmt_limit_reached)
         QMetaObject.connectSlotsByName(MainWindow)
+
+
+    def handleLogSignal(self, log_message):
+        # Update your GUI with log_message
+        self.debug_input.append(log_message)  # Assuming debug_input is a QTextEdit widget
 
     def update_plots(self):
         # Get updated data from the controller.
@@ -546,11 +564,15 @@ class Ui_MainWindow(QObject):
 
         self.pmt_spectra_view.ax.plot(data_max)  # Plot new data
         self.pmt_spectra_view.canvas.draw()  # Update the canvas to show the new plot
-        QTimer.singleShot(time_step, self.plot_osc)  # Call the method again after time_step milliseconds
+        QTimer.singleShot(time_step, self.plot_osc)  # Call the method again after time_step milliseconds.
 
-    @pyqtSlot()
-    def on_initialize_button_clicked(self):
-        self.initializeClicked.emit()
+    @pyqtSlot(float)
+    def update_max_voltage(self, voltage):
+        self.peak_voltagetext.setText(f"{voltage:.2f} V")
+
+    @pyqtSlot(float)
+    def update_avg_voltage(self, voltage):
+        self.avg_voltagetext.setText(f"{voltage:.2f} V")
 
     @pyqtSlot()
     def on_close_button_clicked(self):
@@ -565,14 +587,14 @@ class Ui_MainWindow(QObject):
 
     @pyqtSlot()
     def on_set_offset_clicked(self):
-        offset_text = self.offset_input.text()
+        offset_text = self.edt_phaseoffset.text()
         offset_value = float(offset_text) if offset_text else 0.0
         self.offsetClicked.emit(offset_value)
-        self.offset_input.setStyleSheet("background-color: white")  # reset color
+        self.edt_phaseoffset.setStyleSheet("background-color: white")  # reset color
 
     @pyqtSlot()
-    def on_range_input_changed(self):
-        range_text = self.range_input.currentText()
+    def on_cbx_range_changed(self):
+        range_text = self.cbx_range.currentText()
         range_value = float(range_text) if range_text else 0.0
         self.rangeChosen.emit(range_value)
 
@@ -581,7 +603,19 @@ class Ui_MainWindow(QObject):
 
     @pyqtSlot()
     def on_start_button_clicked(self):
-        self.startbuttonClicked.emit()
+        reps = int(self.edits_map["edt_rep"].text())
+        start_nm = float(self.edits_map["edt_start"].text())
+        end_nm = float(self.edits_map["edt_end"].text())
+        step = float(self.edits_map["edt_step"].text())
+        dwell_time = float(self.edits_map["edt_dwell"].text())
+        filename = self.edt_filename.text()
+        ac_blank = self.edits_map["edt_ac_blank"].text()
+        dc_blank = self.edits_map["edt_dc_blank"].text()
+        det_corr = self.edits_map["edt_det_corr"].text()
+        pem_off = int(self.input_mapping["edt_excWL"].text())
+
+        self.values_changed.emit(reps, start_nm, end_nm, step, dwell_time, filename, ac_blank, dc_blank, det_corr,
+                                 pem_off)
 
     @pyqtSlot()
     def on_stop_button_clicked(self):
@@ -589,10 +623,10 @@ class Ui_MainWindow(QObject):
 
     @pyqtSlot()
     def on_save_comments_clicked(self):
-        comments_text = self.comments_input.text()
+        comments_text = self.edt_comment.text()
         comments_value = str(comments_text) if comments_text else "no comments"
         self.savecommentsClicked.emit(comments_value)
-        self.comments_input.setStyleSheet("background-color: white")  # reset color
+        self.edt_comment.setStyleSheet("background-color: white")  # reset color
 
     @pyqtSlot()
     def on_calibrate_clicked(self):
@@ -600,10 +634,10 @@ class Ui_MainWindow(QObject):
 
     @pyqtSlot()
     def on_set_wavelength_clicked(self):
-        wavelength_text = self.wavelength_input.text()
+        wavelength_text = self.edt_excWL.text()
         wavelength_value = float(wavelength_text) if wavelength_text else 0.0
         self.setwavelengthClicked.emit(wavelength_value)
-        self.wavelength_input.setStyleSheet("background-color: white")  # reset color
+        self.edt_excWL.setStyleSheet("background-color: white")  # reset color
 
     @pyqtSlot()
     def on_set_pmt_clicked(self):
@@ -656,6 +690,7 @@ class Ui_MainWindow(QObject):
         self.peak_voltagetext.setText(QCoreApplication.translate("MainWindow", u"peak_voltage", None))
         self.avg_voltagetext.setText(QCoreApplication.translate("MainWindow", u"avg_voltage", None))
         self.set_pmt.setText(QCoreApplication.translate("MainWindow", u"Set", None))
+        self.var_pem_off.setText(QCoreApplication.translate("MainWindow",u"PEM off", None))
         self.label_26.setText(QCoreApplication.translate("MainWindow", u"Phase Offset:", None))
         self.set_gain.setText(QCoreApplication.translate("MainWindow", u"Set", None))
         self.set_wavelength.setText(QCoreApplication.translate("MainWindow", u"Set", None))
@@ -663,27 +698,17 @@ class Ui_MainWindow(QObject):
         self.set_offset.setText(QCoreApplication.translate("MainWindow", u"Set", None))
         self.calibrate.setText(QCoreApplication.translate("MainWindow", u"Calibrate Phase Offset", None))
         self.spectrasetup_group.setTitle(QCoreApplication.translate("MainWindow", u"Spectra Setup", None))
-        self.set_stepsize.setText(QCoreApplication.translate("MainWindow", u"Set", None))
         self.label_14.setText(QCoreApplication.translate("MainWindow", u"Step size (nm):*", None))
         self.label_18.setText(QCoreApplication.translate("MainWindow", u"Dwell time:*", None))
         self.label_19.setText(QCoreApplication.translate("MainWindow", u"WL min (nm): *", None))
-        self.set_wl_max.setText(QCoreApplication.translate("MainWindow", u"Set", None))
-        self.set_dwelltime.setText(QCoreApplication.translate("MainWindow", u"Set", None))
         self.label_20.setText(QCoreApplication.translate("MainWindow", u"WL max (nm):*", None))
-        self.set_wlmin.setText(QCoreApplication.translate("MainWindow", u"Set", None))
-        self.set_filename.setText(QCoreApplication.translate("MainWindow", u"Set", None))
         self.label_21.setText(QCoreApplication.translate("MainWindow", u"File name:", None))
         self.label_22.setText(QCoreApplication.translate("MainWindow", u"AC Blank file:", None))
         self.label_23.setText(QCoreApplication.translate("MainWindow", u"Repetitions:*", None))
-        self.set_detcorrections.setText(QCoreApplication.translate("MainWindow", u"Set", None))
-        self.set_ac.setText(QCoreApplication.translate("MainWindow", u"Set", None))
         self.label_24.setText(QCoreApplication.translate("MainWindow", u"Det. correction:", None))
-        self.set_repetitions.setText(QCoreApplication.translate("MainWindow", u"Set", None))
         self.label_25.setText(QCoreApplication.translate("MainWindow", u"Comments:", None))
         self.label_27.setText(QCoreApplication.translate("MainWindow", u"DC Blank file:", None))
-        self.set_samplec.setText(QCoreApplication.translate("MainWindow", u"Set", None))
         self.label_28.setText(QCoreApplication.translate("MainWindow", u"Sample C(mol/L):", None))
-        self.set_dc.setText(QCoreApplication.translate("MainWindow", u"Set", None))
         self.start_button.setText(QCoreApplication.translate("MainWindow", u"Start", None))
         self.stop_button.setText(QCoreApplication.translate("MainWindow", u"Stop", None))
         self.save_comments.setText(QCoreApplication.translate("MainWindow", u"Save", None))
@@ -699,3 +724,14 @@ class Ui_MainWindow(QObject):
         self.debug_input.setPlainText(QCoreApplication.translate("MainWindow", u"Debug goes here", None))
 # retranslateUi
     # retranslateUi
+
+    def closeEvent(self, event):
+        reply = QMessageBox.question(
+            self, 'Quit', 'Do you want to quit?',
+            QMessageBox.StandardButtons(QMessageBox.Ok |QMessageBox.Cancel),
+            QMessageBox.Cancel)
+
+        if reply == QMessageBox.Ok:
+            event.accept()
+        else:
+            event.ignore()

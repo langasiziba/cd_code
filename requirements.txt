@@ -10,3 +10,4 @@ matplotlib~=3.7.1
 
 PyQt5~=5.15.9
 ipython~=8.14.0
+pandas~=2.0.2

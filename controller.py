@@ -1,4 +1,5 @@
 import collections
+import math
 import os
 import queue
 import re
@@ -6,18 +7,20 @@ import time
 
 import numpy as np
 import pyvisa
-from PyQt5.QtCore import QTimer, QThread, pyqtSignal, QMutex, QCoreApplication
-from PyQt5.QtWidgets import QMainWindow
+from PyQt5.QtCore import QTimer, QThread, pyqtSignal, QMutex, QCoreApplication, pyqtSlot, Qt
+from PyQt5.QtWidgets import QMainWindow, QApplication
 from PyQt5.QtWidgets import QMessageBox
 from PyQt5.QtWidgets import QVBoxLayout, QDialog, QLabel, QPushButton
+import pandas as pd
 
 import gui
 from mfli import MFLI
 from mono import Monoi, Monoii
 from pem import PEM
+from debug import LogObject
 
 
-class Controller(QMainWindow):
+class Controller(QMainWindow, LogObject):
     lowpass_filter_risetime = 0.6  # s, depends on the timeconstant of the low pass filter
     shutdown_threshold = 2.95  # Vl
     osc_refresh_delay = 100  # ms
@@ -76,6 +79,9 @@ class Controller(QMainWindow):
     cal_collecting = False
     cal_new_value = 0.0
     cal_theta_thread = None
+    log_signal = pyqtSignal(str, bool)
+    progress_signal = pyqtSignal(float, float, float, int, int, float)
+    error_signal = pyqtSignal(str)
 
     def __init__(self):
         super().__init__()
@@ -90,6 +96,7 @@ class Controller(QMainWindow):
         self.monoii_lock.lock()
         self.lockin_daq_lock.lock()
         self.lockin_osc_lock.lock()
+        self.gui = gui
 
         # This trigger to stop spectra acquisition is a list to pass it by reference to the read_data thread
         self.stop_spec_trigger = [False]
@@ -102,10 +109,10 @@ class Controller(QMainWindow):
         # Create GUI
         self.ui = gui.Ui_MainWindow()
         self.ui.setupUi(self)
+        self.gui = gui.Ui_MainWindow()
 
         # Setup log queue and log box
         self.log_queue = queue.Queue()
-        self.log_box = self.gui.edt_debuglog
 
         self.assign_gui_events()
 
@@ -445,85 +452,69 @@ class Controller(QMainWindow):
 
         # ---Start of spectra acquisition section---
 
-    def start_spec(self):
+    def handle_exception(self, exception_str):
+        self.log('Error in record_spec: ' + exception_str, True)
 
-        # this checks if the filename of the spectra exist or not
+    # This function belongs to your class where the GUI is defined.
+    def start_acquisition(self):
         def filename_exists_or_empty(name: str) -> bool:
             if name == '':
                 return True
             else:
                 return os.path.exists(".\\data\\" + name + ".csv")
 
-        def check_illegal_chars(s):
-            result = False
-            for c in s:
-                if c in '#@$%^&*{}:;"|<>/?\`~' + "'":
-                    result = True
-                    break
-            return result
+        ac_blank = self.gui.edits_map["edt_ac_blank"].text()
+        dc_blank = self.gui.edits_map["edt_dc_blank"].text()
+        det_corr = self.gui.edits_map["edt_det_corr"].text()
+        filename = self.gui.edits_map["edt_filename"].text()
+        reps = int(self.gui.edits_map["edt_rep"].text())
+        start_nm = float(self.gui.edits_map["edt_start"].text())
+        end_nm = float(self.gui.edits_map["edt_end"].text())
+        step = float(self.gui.edits_map["edt_step"].text())
+        dwell_time = float(self.gui.edits_map["edt_dwell"].text())
+        pem_off = self.gui.edits_map["var_pem_off"].text()
 
-        # acquire the settings from the user
-        ac_blank = self.gui.edt_ac_blank.text()
-        dc_blank = self.gui.edt_dc_blank.text()
-        det_corr = self.gui.edt_det_corr.text()
-        filename = self.gui.edt_filename.text()
-        reps = int(self.gui.edt_rep.text())
-
+        # check if the files exist or not
         ac_blank_exists = filename_exists_or_empty(ac_blank)
         dc_blank_exists = filename_exists_or_empty(dc_blank)
         det_corr_exists = filename_exists_or_empty(det_corr)
 
-        if not check_illegal_chars(filename):
-            try:
-                # For averaged measurements add the suffix of the first scan for the filename check
-                if reps == 1:
-                    s = ''
-                else:
-                    s = '_1'
-                filename_exists = filename_exists_or_empty(filename + s)
-
-                error = not ac_blank_exists or not dc_blank_exists or not det_corr_exists or filename_exists
-
-                if not error:
-                    self.stop_spec_trigger[0] = False
-
-                    self.set_acquisition_running(True)
-
-                    self.spec_thread = th.Thread(target=self.record_spec, args=(
-                        float(self.gui.edt_start.get()),
-                        float(self.gui.edt_end.get()),
-                        float(self.gui.edt_step.get()),
-                        float(self.gui.edt_dwell.get()),
-                        reps,
-                        filename,
-                        ac_blank,
-                        dc_blank,
-                        det_corr,
-                        self.gui.var_pem_off.get()))
-                    self.spec_thread.start()
-                    self.update_spec()
-                else:
-                    if not ac_blank_exists:
-                        self.log('Error: AC-blank file does not exist!', True)
-                    if not dc_blank_exists:
-                        self.log('Error: DC-blank file does not exist!', True)
-                    if not det_corr_exists:
-                        self.log('Error: Detector correction file does not exist!', True)
-                    if filename_exists:
-                        self.log('Error: Spectra filename {} already exists!'.format(filename + s), True)
-            except Exception as e:
-                self.log('Error in click_start_spec: ' + str(e), True)
+        # For averaged measurements add the suffix of the first scan for the filename check
+        if reps > 1:
+            filename_check = filename + '_1'
         else:
-            self.log('Error: Filename contains one of these illegal characters: ' + '#@$%^&*{}:;"|<>/?\`~' + "'")
+            filename_check = filename
 
-        # will be executed in separate thread
+        filename_exists = filename_exists_or_empty(filename_check)
+
+        error = not ac_blank_exists or not dc_blank_exists or not det_corr_exists or filename_exists
+
+        if error:
+            if not ac_blank_exists:
+                self.log('Error: AC-blank file does not exist!', True)
+            if not dc_blank_exists:
+                self.log('Error: DC-blank file does not exist!', True)
+            if not det_corr_exists:
+                self.log('Error: Detector correction file does not exist!', True)
+            if filename_exists:
+                self.log('Error: Spectra filename {} already exists!'.format(filename_check), True)
+        else:
+            # Start the SpecThread with the parameters from the GUI
+            self.start_spec(start_nm, end_nm, step, dwell_time, reps, filename, ac_blank, dc_blank, det_corr, pem_off)
+
+    def start_spec(self, start_nm, end_nm, step, dwell_time, reps, filename, ac_blank, dc_blank, det_corr, pem_off):
+        self.spec_thread = SpecThread(start_nm, end_nm, step, dwell_time, reps, filename, ac_blank, dc_blank,
+                                      det_corr, pem_off, self)
+        self.spec_thread.recordSignal.connect(self.update_spec)  # connect the signal to your update function
+        self.spec_thread.exceptionSignal.connect(self.handle_exception)  # handle exceptions
+        self.spec_thread.start()
 
     def record_spec(self, start_nm: float, end_nm: float, step: float, dwell_time: float, reps: int, filename: str,
                     ac_blank: str, dc_blank: str, det_corr: str, pem_off: int):
 
         def check_lp_theta_std(lp: float) -> bool:
             if lp < self.lp_theta_std_warning_threshold:
-                self.log(
+                self.log_signal.emit(
                     'Warning: Possibly linearly polarized emisssion at {:.2f} (lp_theta_std = {:.3f})!'.format(curr_nm,
                                                                                                                lp),
                     False)
@@ -531,29 +522,23 @@ class Controller(QMainWindow):
             else:
                 return False
 
-        # try:
-        self.log('')
-        self.log('Spectra acquisition: {:.2f} to {:.2f} nm with {:.2f} nm steps and {:.3f} s per step'.format(start_nm,
-                                                                                                              end_nm,
-                                                                                                              step,
-                                                                                                              dwell_time))
+        self.log_signal.emit('', False)
+        self.log_signal.emit(
+            'Spectra acquisition: {:.2f} to {:.2f} nm with {:.2f} nm steps and {:.3f} s per step'.format(start_nm,
+                                                                                                         end_nm, step,
+                                                                                                         dwell_time),
+            False)
 
-        self.log('Starting data acquisition.')
+        self.log_signal.emit('Starting data acquisition.', False)
 
         self.lockin_daq_lock.acquire()
         self.lockin_daq.set_dwell_time(dwell_time)
         self.lockin_daq_lock.release()
 
-        # wait for MFLI buffer to be ready
         self.interruptable_sleep(dwell_time)
 
-        # array of pandas dataframes with all spectral data
         dfall_spectra = np.empty(reps, dtype=object)
-        # avg_spec is used to display the averaged spectrum during the measurement
-        self.avg_spec = np.array([[],  # wavelength
-                                  [],  # DC
-                                  [],  # AC
-                                  []])  # glum
+        self.avg_spec = np.array([[], [], [], []])
 
         correction = ac_blank != '' or dc_blank != '' or det_corr != ''
 
@@ -563,9 +548,8 @@ class Controller(QMainWindow):
             inc = step
         direction = np.sign(inc)
 
-        self.update_progress_txt(0, 1, 0, 1, reps, 0)
+        self.progress_signal.emit(0, 1, 0, 1, reps, 0)
 
-        # Disable PEM for AC background measurement
         self.set_modulation_active(pem_off == 0)
 
         time_since_start = -1.0
@@ -573,83 +557,52 @@ class Controller(QMainWindow):
 
         i = 0
         while (i < reps) and not self.stop_spec_trigger[0]:
-            self.log('')
-            self.log('Run {}/{}'.format(i + 1, reps))
+            self.log_signal.emit('', False)
+            self.log_signal.emit('Run {}/{}'.format(i + 1, reps), False)
 
             lp_detected = False
 
-            self.curr_spec = np.array([[],  # wavelenght
-                                       [],  # AC
-                                       [],  # AC stddev
-                                       [],  # DC
-                                       [],  # DC stddev
-                                       [],  # I_L
-                                       [],  # I_L stddev
-                                       [],  # I_R
-                                       [],  # I_R stddev
-                                       [],  # glum
-                                       [],  # glum stddev
-                                       [],  # lp_r
-                                       [],  # lp_r stddev
-                                       [],  # lp theta
-                                       [],  # lp theta stddev
-                                       [],  # lp
-                                       []])  # lp stddev
+            self.curr_spec = np.array([[], [], [], [], [], [], [], [], [], [], [], [], [], [], [], [], [], []])
 
-            # self.log('start {}'.format(time.time()-t0))
             curr_nm = start_nm - inc
             while ((((direction > 0) and (curr_nm < end_nm)) or ((direction < 0) and (curr_nm > end_nm)))
                    and not self.stop_spec_trigger[0]):
 
                 curr_nm = curr_nm + inc
-                # self.log('before move {:.3f}'.format(time.time()-t0))
                 self.move_nm(curr_nm, pem_off == 0)
-                # self.log('after move {:.3f}'.format(time.time()-t0))
 
                 self.interruptable_sleep(self.lowpass_filter_risetime)
-                # self.log('afer risetime {:.3f}'.format(time.time()-t0))
 
-                # try three times to get a successful measurement
                 j = 0
                 success = False
-                # Try 5 times to get a valid dataset from the MFLI
                 while (j < 5) and not success and not self.stop_spec_trigger[0]:
-                    # self.log('before acquire {:.3f}'.format(time.time()-t0))
                     self.lockin_daq_lock.acquire()
-                    # self.log('afer lock {:.3f}'.format(time.time()-t0))
                     data = self.lockin_daq.read_data(self.stop_spec_trigger)
-                    # self.log('after read {:.3f}'.format(time.time()-t0))
                     self.lockin_daq_lock.release()
 
                     if not self.stop_spec_trigger[0]:
-                        # Check if there is a linearly polarized component (2f) in the signal
                         lp_detected = lp_detected or check_lp_theta_std(data['data'][self.index_lp_theta])
-                        # self.log('afeter release {:.3f}'.format(time.time()-t0))
                         success = data['success']
                     j += 1
 
                 if not success and not self.stop_spec_trigger[0]:
                     self.stop_spec_trigger[0] = True
-                    self.log('Could not collect data after 5 tries, aborting...', True)
+                    self.error_signal.emit('Could not collect data after 5 tries, aborting...')
 
                 if not self.stop_spec_trigger[0]:
-                    # add current wavelength to dataset
                     data_with_WL = np.array([np.concatenate(([curr_nm], data['data']))])
-                    # add dataset to current spectrum
                     self.curr_spec = np.hstack((self.curr_spec, data_with_WL.T))
                     if reps > 1:
                         self.add_data_to_avg_spec(data_with_WL, i)
 
                 time_since_start = time.time() - t0
-                self.update_progress_txt(start_nm, end_nm, curr_nm, i + 1, reps, time_since_start)
-                # self.log('before next step {:.3f}'.format(time.time()-t0))
+                self.progress_signal.emit(start_nm, end_nm, curr_nm, i + 1, reps, time_since_start)
 
             if self.stop_spec_trigger[0]:
                 self.set_PMT_voltage(0.0)
 
-            self.log('This scan took {:.0f} s.'.format(time_since_start))
+            self.log_signal.emit('This scan took {:.0f} s.'.format(time_since_start), False)
 
-            # process spectra as dataframes (df)
             dfcurr_spec = self.np_to_pd(self.curr_spec)
             if reps > 1:
                 index_str = '_' + str(i + 1)
@@ -664,93 +617,419 @@ class Controller(QMainWindow):
             dfall_spectra[i] = dfcurr_spec
 
             if lp_detected:
-                self.log('')
-                self.log('Warning: Possibly linearly polarized emission!', True)
+                self.log_signal.emit('', False)
+                self.log_signal.emit('Warning: Possibly linearly polarized emission!', True)
 
             i += 1
 
-        self.log('Stopping data acquisition.')
+        self.log_signal.emit('Stopping data acquisition.', False)
         self.set_acquisition_running(False)
 
-        # averaging and correction of the averaged spectrum
         if reps > 1 and not self.stop_spec_trigger[0]:
             dfavg_spec = self.df_average_spectra(dfall_spectra)
             self.save_spec(dfavg_spec, filename + '_avg', False)
 
             if correction:
-                dfavg_spec_corr = self.apply_corr(dfavg_spec_recalc, ac_blank, dc_blank, det_corr)
+                dfavg_spec_corr = self.apply_corr(dfavg_spec, ac_blank, dc_blank, det_corr)
                 self.save_spec(dfavg_spec_corr, filename + '_avg_corr', False)
 
-        self.log('')
-        self.log('Returning to start wavelength')
+        self.log_signal.emit('', False)
+        self.log_signal.emit('Returning to start wavelength', False)
         self.set_modulation_active(True)
         self.move_nm(start_nm, move_pem=True)
 
         self.stop_spec_trigger[0] = False
-        # except Exception as e:
-        # self.log("Error in record_spec: {}".format(str(e)))
 
+    def interruptable_sleep(self, t: float):
+        start = time.time()
+        while (time.time() - start < t) and not self.stop_spec_trigger[0]:
+            time.sleep(0.01)
 
-    def open_cal_dialog(self):
-        self.cal_dialog = PhaseOffsetCalibrationDialog(self)
-        self.cal_dialog.show()
+    def add_data_to_avg_spec(self, data, curr_rep: int):
+        # avg_spec structure: [[WL],[DC],[AC],[gabs]]
+        if curr_rep == 0:
+            self.avg_spec = np.hstack((self.avg_spec, np.array(
+                ([data[0][0]], [data[0][self.index_dc]], [data[0][self.index_ac]], [data[0][self.index_glum]]))))
+        else:
+            # find index where the wavelength of the new datapoint matches
+            index = np.where(self.avg_spec[0] == data[0][0])[0]
+            if len(index) > 0:
+                # reaverage DC and AC
+                self.avg_spec[1][index[0]] = (self.avg_spec[1][index[0]] * curr_rep + data[0][self.index_dc]) / (
+                        curr_rep + 1)
+                self.avg_spec[2][index[0]] = (self.avg_spec[2][index[0]] * curr_rep + data[0][self.index_ac]) / (
+                        curr_rep + 1)
+                # recalculate glum
+                self.avg_spec[3][index[0]] = 2 * self.avg_spec[2][index[0]] / self.avg_spec[1][index[0]]
 
-    # Implement other methods
+                # converts a numpy array to a pandas DataFrame
+
+    def np_to_pd(self, spec):
+        df = pd.DataFrame(spec.T)
+        df.columns = ['WL', 'DC', 'DC_std', 'AC', 'AC_std', 'I_L', 'I_L_std', 'I_R', 'I_R_std', 'gabs', 'gabs_std',
+                      'ld', 'ld_std', 'mollar_ellips', 'molar_ellips_std', 'ellips', 'ellips_std']
+        df = df.set_index('WL')
+        return df
+
+    def df_average_spectra(self, dfspectra):
+        self.log('')
+        self.log('Averaging...')
+        # create a copy of the Dataframe structure of a spectrum filled with zeros
+        dfavg = dfspectra[0].copy()
+        dfavg.iloc[:, :] = 0.0
+
+        count = len(dfspectra)
+        # The error of the averaged spectrum is estimated using Gaussian propagation of uncertainty
+        for i in range(0, count):
+            dfavg['DC'] = dfavg['DC'] + dfspectra[i]['DC'] / count
+            dfavg['DC_std'] = dfavg['DC_std'] + (dfspectra[i]['DC_std'] / count) ** 2
+            dfavg['AC'] = dfavg['AC'] + dfspectra[i]['AC'] / count
+            dfavg['AC_std'] = dfavg['AC_std'] + (dfspectra[i]['AC_std'] / count) ** 2
+            dfavg['ld'] = dfavg['ld'] + dfspectra[i]['ld'] / count
+            dfavg['ld_std'] = dfavg['ld_std'] + (dfspectra[i]['ld_std'] / count) ** 2
+            dfavg['mollar_ellips'] = dfavg['mollar_ellips'] + dfspectra[i]['mollar_ellips'] / count
+            dfavg['molar_ellips_std'] = dfavg['molar_ellips_std'] + (dfspectra[i]['molar_ellips_std'] / count) ** 2
+            dfavg['ellips'] = dfavg['ellips'] + dfspectra[i]['ellips'] / count
+            dfavg['ellips_std'] = dfavg['ellips_std'] + (dfspectra[i]['ellips_std'] / count) ** 2
+        dfavg['AC_std'] = dfavg['AC_std'] ** (0.5)
+        dfavg['DC_std'] = dfavg['DC_std'] ** (0.5)
+        dfavg['ld_std'] = dfavg['ld_std'] ** (0.5)
+        dfavg['molar_ellips_std'] = dfavg['molar_ellips_std'] ** (0.5)
+        dfavg['ellips_std'] = dfavg['ellips_std'] ** (0.5)
+
+        dfavg = self.calc_cd(dfavg)
+
+        return dfavg
+
+    def apply_corr(self, dfspec: pd.DataFrame, ac_blank: str, dc_blank: str, det_corr: str):
+
+        # Gives True if wavelength region is suitable
+        def is_corr_suitable(df_corr: pd.DataFrame, check_index: bool) -> bool:
+            first_WL_spec = dfspec.index[0]
+            last_WL_spec = dfspec.index[-1]
+
+            first_WL_corr = df_corr.index[0]
+            last_WL_corr = df_corr.index[-1]
+
+            # Check if the wavelength region in dfspec is covered by df_det_corr
+            WL_region_ok = min(first_WL_spec, last_WL_spec) >= min(first_WL_corr, last_WL_corr) and max(first_WL_spec,
+                                                                                                        last_WL_spec) <= max(
+                first_WL_corr, last_WL_corr)
+            # Check if the measured wavelength values are available in the correction file (for AC and DC without interpolation)
+            values_ok = not check_index or dfspec.index.isin(df_corr.index).all()
+
+            return WL_region_ok and values_ok
+
+        # Interpolate the detector correction values to match the measured wavelength values
+        def interpolate_detcorr():
+            # Create a copy of the measured wavelengths and fill it with NaNs
+            dfspec_nan = pd.DataFrame()
+            dfspec_nan['nan'] = dfspec['AC'].copy()
+            dfspec_nan.iloc[:, 0] = float('NaN')
+
+            nonlocal df_det_corr
+            # Add the measured wavelengths to the correction data, missing values in the correction data will be set to NaN
+            df_det_corr = pd.concat([df_det_corr, dfspec_nan], axis=1).drop('nan', axis=1)
+            # Interpolate missing values in the correction data
+            df_det_corr = df_det_corr.interpolate(method='index')
+            # Limit WL values of correction data to measured wavelengths
+            df_det_corr = df_det_corr.filter(items=dfspec_nan.index, axis=0)
+
+        self.log('')
+        self.log('Baseline correction...')
+
+        # Correction for detector sensitivity
+        # Todo global data path
+        if det_corr != '':
+            self.log('Detector sensitivity correction with {}'.format(".\\data\\" + det_corr + ".csv"))
+            df_det_corr = pd.read_csv(filepath_or_buffer=".\\data\\" + det_corr + ".csv", sep=',', index_col='WL')
+
+            if is_corr_suitable(df_det_corr, False):
+                interpolate_detcorr()
+                dfspec['DC'] = dfspec['DC'] / df_det_corr.iloc[:, 0]
+                dfspec['DC_std'] = dfspec['DC_std'] / df_det_corr.iloc[:, 0]
+                dfspec['AC'] = dfspec['AC'] / df_det_corr.iloc[:, 0]
+                dfspec['AC_std'] = dfspec['AC_std'] / df_det_corr.iloc[:, 0]
+            else:
+                self.log('Detector correction file does not cover the measured wavelength range!', True)
+
+        # AC baseline correction
+        if ac_blank != '':
+            self.log('AC blank correction with {}'.format(".\\data\\" + ac_blank + ".csv"))
+            df_ac_blank = pd.read_csv(filepath_or_buffer=".\\data\\" + ac_blank + ".csv", sep=',', index_col='WL')
+
+            if is_corr_suitable(df_ac_blank, True):
+                dfspec['AC'] = dfspec['AC'] - df_ac_blank['AC']
+                dfspec['AC_std'] = ((dfspec['AC_std'] / 2) ** 2 + (df_ac_blank['AC_std'] / 2) ** 2) ** 0.5
+            else:
+                self.log('AC blank correction file does not contain the measured wavelengths!', True)
+
+                # DC baseline correction
+        if dc_blank != '':
+            self.log('DC blank correction with {}'.format(".\\data\\" + dc_blank + ".csv"))
+            df_dc_blank = pd.read_csv(filepath_or_buffer=".\\data\\" + dc_blank + ".csv", sep=',', index_col='WL')
+
+            if is_corr_suitable(df_dc_blank, True):
+                dfspec['DC'] = dfspec['DC'] - df_dc_blank['DC']
+                dfspec['DC_std'] = ((dfspec['DC_std'] / 2) ** 2 + (df_dc_blank['DC_std'] / 2) ** 2) ** 0.5
+            else:
+                self.log('DC blank correction file does not contain the measured wavelengths!', True)
+
+                # If there are wavelength values in the blankfiles that are not in dfspec this will give NaN values
+        # Drop all rows that contain NaN values
+        # The user must make sure that the blank files contain the correct values for the measurement
+        dfspec = dfspec.dropna(axis=0)
+
+        dfspec = self.calc_cd(dfspec)
+        return dfspec
+
+    def calc_cd(self, df):
+        df['I_L'] = (df['AC'] + df['DC'])
+        df['I_R'] = (df['DC'] - df['AC'])
+        df['gabs'] = (df['I_L'] - df['I_R']) / (df['I_L'] - df['I_R'])
+        # Gaussian error progression
+        df['I_L_std'] = ((df['AC_std']) ** 2 + (df['DC_std']) ** 2) ** 0.5
+        df['I_R_std'] = df['I_L_std'].copy()
+        df['gabs_std'] = ((4 * df['I_R'] ** 2 / (df['I_L'] + df['I_R']) ** 4) * df['I_L_std'] ** 2
+                          + (4 * df['I_L'] ** 2 / (df['I_L'] + df['I_R']) ** 4) * df['I_R_std'] ** 2) ** 0.5
+
+        return df
+
+    def abort_measurement(self):
+        self.log('')
+        self.log('>>Aborting measurement<<')
+
+        self.stop_spec_trigger[0] = True
+        self.reactivate_after_abort()
+
+    def reactivate_after_abort(self):
+        if not self.spec_thread is None:
+            if self.spec_thread.is_alive():
+                QTimer.singleShot(500, self.reactivate_after_abort)
+            else:
+                self.set_acquisition_running(False)
+        else:
+            self.set_acquisition_running(False)
+
+    def set_modulation_active(self, b):
+        # deactivating phase-locked loop on PEM reference in lock-in to retain last PEM frequency
+        self.lockin_daq_lock.lock()
+        self.lockin_daq.set_extref_active(0, b)
+        self.lockin_daq.daq.sync()
+        self.lockin_daq_lock.unlock()
+
+        # deactivating pem will cut off reference signal and modulation
+        self.pem_lock.lock()
+        self.pem.set_active(b)
+        self.pem_lock.unlock()
+        if not b:
+            self.gui.canvas.itemconfigure(self.gui.txt_PEM, text='off')
+
+    def set_phaseoffset(self, value):
+        if self.initialized:
+            lockin_daq_set_phase_offset_thread = LockinDAQSetPhaseOffsetThread(self.lockin_daq, value)
+            lockin_daq_set_phase_offset_thread.start()
+            lockin_daq_set_phase_offset_thread.wait()
+
+    def move_nm(self, nm, move_pem=True):
+        self.log('')
+        self.log('Move to {} nm'.format(nm))
+        if self.initialized:
+            mono_thread = MoveThread(self.mono, nm)
+            mono_thread.start()
+
+            if move_pem:
+                self.pem_lock.lock()
+                self.pem.set_nm(nm)
+                self.pem_lock.unlock()
+                self.update_pem_lbl(nm)
+
+            mono_thread.wait()
+
+            self.update_mono_edt_lbl(nm)
+
+            if self.acquisition_running:
+                self.interruptable_sleep(self.move_delay)
+            else:
+                time.sleep(self.move_delay)
+        else:
+            self.log('Instruments not initialized!', True)
+
+    def mono_move(self, nm):
+        mono_move_thread = MoveThread(self.mono, nm)
+        mono_move_thread.start()
+        mono_move_thread.wait()
+
+    def volt_to_gain(self, volt):
+        return 10 ** (volt * self.pmt_slope + self.pmt_offset) / self.gain_norm
+
+    def gain_to_volt(self, gain):
+        if gain < 1.0:
+            return 0.0
+        elif gain >= self.max_gain:
+            return 1.1
+        else:
+            return max(min((math.log10(gain * self.gain_norm) - self.pmt_offset) / self.pmt_slope, 1.1), 0.0)
+
+    def set_PMT_voltage(self, volt):
+        try:
+            lockin_daq_thread = LockinDAQThread(self.lockin_daq, volt)
+            lockin_daq_thread.start()
+            lockin_daq_thread.wait()
+
+            self.update_PMT_voltage_edt(volt)
+        except Exception as e:
+            self.log('Error in set_PMT_voltage: ' + str(e), True)
+
+    def rescue_pmt(self):
+        self.log('Signal ({:.2f} V) higher than threshold ({:.2f} V)!! Setting PMT to 0 V'.format(self.max_volt,
+                                                                                                  self.shutdown_threshold),
+                 True)
+        self.set_PMT_voltage(0.0)
+
+    def set_input_range(self, f):
+        self.lockin_daq_lock.lock()
+        self.lockin_daq.set_input_range(f=f, auto=False)
+        self.lockin_daq_lock.unlock()
+
+    def set_auto_range(self):
+        auto_range_thread = AutoRangeThread(self.lockin_daq)
+        auto_range_thread.updated_signal_range.connect(lambda x: self.gui.cbx_range.setCurrentText(x))
+        auto_range_thread.start()
+
+    def set_phaseoffset(self, f):
+        phase_offset_thread = PhaseOffsetThread(self.lockin_daq, f)
+        phase_offset_thread.updated_phaseoffset.connect(self.update_phaseoffset_edt)
+        phase_offset_thread.start()
+
+    # ---oscilloscope section start---
+    def start_osc_monit(self):
+        self.oscilloscope_thread = OscilloscopeThread(self)
+        self.oscilloscope_thread.max_voltage_signal.connect(self.gui.update_max_voltage)
+        self.oscilloscope_thread.avg_voltage_signal.connect(self.gui.update_avg_voltage)
+        self.oscilloscope_thread.range_limit_reached_signal.connect(self.handle_range_limit_reached)
+        self.oscilloscope_thread.pmt_limit_reached_signal.connect(self.handle_pmt_limit_reached)
+        self.oscilloscope_thread.start()
+
+    def handle_range_limit_reached(self):
+        self.set_auto_range()
+        if self.acquisition_running:
+            self.log(
+                'Input range limit reached during measurement! Restart with higher input range or lower gain. Aborting...',
+                True)
+            self.abort_measurement()
+
+    def handle_pmt_limit_reached(self):
+        self.rescue_pmt()
+        if self.acquisition_running:
+            self.abort_measurement()
+
+    # ---Phase offset calibration section start---
+
+    from PyQt5.QtCore import QThread, QTimer
+
+    # ---Phase offset calibration section start---
+
+    class RecordThread(QThread):
+        def __init__(self, parent=None, positive=None, lock=None):
+            super().__init__(parent)
+            self.positive = positive
+            self.lock = lock
+
+        def run(self):
+            self.parent().log('Thread started...')
+            with self.lock:
+                avg = self.parent().lockin_daq.read_ac_theta(self.parent().stop_cal_trigger)
+
+            if self.positive:
+                self.parent().cal_pos_theta = avg
+            else:
+                self.parent().cal_neg_theta = avg
+            self.parent().log('Thread stopped...')
+
+    def cal_phaseoffset_start(self):
+        self.log('')
+        self.log('Starting calibration...')
+        self.log('Current phaseoffset: {:.3f} deg'.format(self.lockin_daq.phaseoffset))
+
+        self.cal_running = True
+        self.cal_collecting = False
+        self.stop_cal_trigger = [False]
+        self.set_active_components()
+
+        self.cal_new_value = float('NaN')
+        self.cal_pos_theta = 0.0
+        self.cal_neg_theta = 0.0
+
+        self.cal_window = PhaseOffsetCalibrationDialog(self)
+
     def cal_start_record_thread(self, positive):
         self.cal_collecting = True
         self.stop_cal_trigger[0] = False
         self.set_active_components()
-        self.cal_theta_thread = RecordThread(self, positive)
-        self.cal_theta_thread.exceptionSignal.connect(self.handle_thread_exception)
+        self.cal_theta_thread = RecordThread(self.log, self.lockin_daq, self.stop_cal_trigger,
+                                             self.set_cal_pos_theta, self.set_cal_neg_theta,
+                                             positive, self.lockin_daq_lock)
         self.cal_theta_thread.start()
 
-    def edt_changed(self, var):
-        edt = self.gui.input_mapping[var]
-        edt.setStyleSheet("background-color: yellow")
+    # these are the new setters for the cal_pos_theta and cal_neg_theta attributes
+    def set_cal_pos_theta(self, value):
+        self.cal_pos_theta = value
 
-    def handle_thread_exception(self, msg):
-        # Handle the exception message in some way. For example, you could print it:
-        print("Exception in RecordThread:", msg)
-
-    def cal_stop_record(self):
-        pass
+    def set_cal_neg_theta(self, value):
+        self.cal_neg_theta = value
 
     def cal_get_current_values(self):
-        return 0, 0
+        return self.lockin_daq.ac_theta_avg, self.lockin_daq.ac_theta_count
 
-    def cal_get_new_phaseoffset(self, skipped_pos_cal, skipped_neg_cal):
-        return 0
+    def cal_stop_record(self):
+        if self.cal_collecting:
+            self.stop_cal_trigger[0] = True
+            self.cal_collecting = False
+            self.set_active_components()
+
+    def cal_get_new_phaseoffset(self, skipped_pos, skipped_neg):
+        result = float('NaN')
+        n = 0
+        difference = 0
+        if not skipped_pos:
+            self.log('Positive theta at {:.3f} deg'.format(self.cal_pos_theta))
+            difference += self.cal_pos_theta - 90
+            n += 1
+        if not skipped_neg:
+            self.log('Negative theta at {:.3f} deg'.format(self.cal_neg_theta))
+            difference += self.cal_neg_theta + 90
+            n += 1
+        if n > 0:
+            self.log('Change in phaseoffset: {:.3f} deg'.format(difference / n))
+            result = self.lockin_daq.phaseoffset + difference / n
+        self.cal_new_value = result
+        return result
 
     def cal_apply_new(self):
-        pass
+        if not math.isnan(self.cal_new_value):
+            self.set_phaseoffset(self.cal_new_value)
+
+    def cal_end_after_thread(self):
+        if self.cal_theta_thread.isRunning():
+            QTimer.singleShot(100, self.cal_end_after_thread)
+        else:
+            self.cal_end()
 
     def cal_end(self):
-        pass
+        self.cal_collecting = False
+        self.cal_running = False
+        self.stop_cal_trigger[0] = False
+        self.set_active_components()
+        self.cal_window.close()
 
+        self.log('')
+        self.log('End of phase calibration.')
 
+        # Save new calibration in last parameters file
+        self.save_params('last')
 
-class RecordThread(QThread):
-    exceptionSignal = pyqtSignal(str)  # Define a signal to emit exception messages
-
-    def __init__(self, controller, positive):
-        QThread.__init__(self)
-        self.controller = controller
-        self.positive = positive
-
-    def run(self):
-        try:
-            self.controller.log('Thread started...')
-            self.controller.lockin_daq_lock.acquire()
-            avg = self.controller.lockin_daq.read_ac_theta(self.controller.stop_cal_trigger)
-            self.controller.lockin_daq_lock.release()
-
-            if self.positive:
-                self.controller.cal_pos_theta = avg
-            else:
-                self.controller.cal_neg_theta = avg
-            self.controller.log('Thread stopped...')
-        except Exception as e:
-            self.exceptionSignal.emit(str(e))
+    # ---Phase offset calibration section end---
 
 
 class PhaseOffsetCalibrationDialog(QDialog):
@@ -804,7 +1083,7 @@ class PhaseOffsetCalibrationDialog(QDialog):
         self.step += 1
 
         if self.step == 1:
-            self.lbl_text.setText('Collecting phase of positive CPL ')
+            self.lbl_text.setText('Collecting phase of positive CD ')
             self.t0 = time.time()
             QTimer.singleShot(self.update_interval, self.update_loop)
             self.controller.cal_start_record_thread(positive=True)
@@ -821,7 +1100,7 @@ class PhaseOffsetCalibrationDialog(QDialog):
                                   'strong CD')
 
         elif self.step == 3:
-            self.lbl_text.setText('Collecting phase of negative CPL')
+            self.lbl_text.setText('Collecting phase of negative CD')
             self.t0 = time.time()
             QTimer.singleShot(self.update_interval, self.update_loop)
             self.controller.cal_start_record_thread(positive=False)
@@ -906,3 +1185,164 @@ class PhaseOffsetCalibrationDialog(QDialog):
 
     def disable_event(self):
         pass
+
+
+class RecordThread(QThread):
+    def __init__(self, log_method, lockin_daq, stop_cal_trigger, set_pos_theta, set_neg_theta, positive=None,
+                 lock=None):
+        super().__init__()
+        self.positive = positive
+        self.lock = lock
+        self.log_method = log_method
+        self.lockin_daq = lockin_daq
+        self.stop_cal_trigger = stop_cal_trigger
+        self.set_pos_theta = set_pos_theta
+        self.set_neg_theta = set_neg_theta
+
+    def run(self):
+        self.log_method('Thread started...')
+        with self.lock:
+            avg = self.lockin_daq.read_ac_theta(self.stop_cal_trigger)
+
+        if self.positive:
+            self.set_pos_theta(avg)
+        else:
+            self.set_neg_theta(avg)
+        self.log_method('Thread stopped...')
+
+
+class SpecThread(QThread):
+    recordSignal = pyqtSignal(float, float, float, float, int, str, str, str, str, int)  # update signal
+    exceptionSignal = pyqtSignal(str)  # exception signal
+
+    def __init__(self, start_nm, end_nm, step, dwell_time, reps, filename, ac_blank, dc_blank, det_corr, pem_off,
+                 controller):
+        QThread.__init__(self)
+        self.start_nm = start_nm
+        self.end_nm = end_nm
+        self.step = step
+        self.dwell_time = dwell_time
+        self.reps = reps
+        self.filename = filename
+        self.ac_blank = ac_blank
+        self.dc_blank = dc_blank
+        self.det_corr = det_corr
+        self.pem_off = pem_off
+        self.controller = controller
+
+    def run(self):
+        try:
+            self.controller.record_spec(self.start_nm, self.end_nm, self.step, self.dwell_time, self.reps,
+                                        self.filename, self.ac_blank, self.dc_blank, self.det_corr, self.pem_off)
+        except Exception as e:
+            self.exceptionSignal.emit(str(e))
+
+
+class MoveThread(QThread):
+    def __init__(self, mono, nm, parent=None):
+        super(MoveThread, self).__init__(parent)
+        self.mono = mono
+        self.nm = nm
+
+    def run(self):
+        self.mono.set_nm(self.nm)
+
+
+class LockinDAQThread(QThread):
+    def __init__(self, lockin_daq, volt, parent=None):
+        super(LockinDAQThread, self).__init__(parent)
+        self.lockin_daq = lockin_daq
+        self.volt = volt
+
+    def run(self):
+        self.lockin_daq.set_PMT_voltage(self.volt, False)
+
+
+class LockinDAQSetPhaseOffsetThread(QThread):
+    def __init__(self, lockin_daq, value, parent=None):
+        super(LockinDAQSetPhaseOffsetThread, self).__init__(parent)
+        self.lockin_daq = lockin_daq
+        self.value = value
+
+    def run(self):
+        self.lockin_daq.set_phaseoffset(self.value)
+
+
+class AutoRangeThread(QThread):
+    updated_signal_range = pyqtSignal(str)
+
+    def __init__(self, lockin_daq, parent=None):
+        super(AutoRangeThread, self).__init__(parent)
+        self.lockin_daq = lockin_daq
+
+    def run(self):
+        self.lockin_daq.set_input_range(f=0.0, auto=True)
+        self.updated_signal_range.emit('{:.3f}'.format(self.lockin_daq.signal_range))
+
+
+class PhaseOffsetThread(QThread):
+    updated_phaseoffset = pyqtSignal(float)
+
+    def __init__(self, lockin_daq, f, parent=None):
+        super(PhaseOffsetThread, self).__init__(parent)
+        self.lockin_daq = lockin_daq
+        self.f = f
+
+    def run(self):
+        self.lockin_daq.set_phaseoffset(self.f)
+        self.updated_phaseoffset.emit(self.f)
+
+
+class OscilloscopeThread(QThread):
+    max_voltage_signal = pyqtSignal(float)
+    avg_voltage_signal = pyqtSignal(float)
+    range_limit_reached_signal = pyqtSignal()
+    pmt_limit_reached_signal = pyqtSignal()
+
+    def __init__(self, controller):
+        QThread.__init__(self)
+        self.controller = controller
+        # initialize other attributes here...
+
+    def run(self):
+        while not self.controller.stop_osc_trigger:
+            time.sleep(self.controller.osc_refresh_delay / 1000)
+
+            self.controller.lockin_osc_lock.acquire()
+            scope_data = self.controller.lockin_osc.read_scope()
+            self.controller.lockin_osc_lock.release()
+
+            max_volt = scope_data[0]
+            avg_volt = scope_data[1]
+            if not np.isnan(max_volt):
+                self.max_voltage_signal.emit(max_volt)
+                self.avg_voltage_signal.emit(avg_volt)
+
+                # Check if value reached input range limit by checking if the last 5 values are the same and
+                # close to input range (>95%)
+                if len(self.controller.max_volt_history) >= 5:
+                    range_limit_reached = True
+                    for i in range(2, 6):
+                        range_limit_reached = range_limit_reached and (
+                                math.isclose(self.controller.max_volt_history[-i], max_volt, abs_tol=0.000000001)
+                                and (self.controller.max_volt_history[
+                                         -i] >= 0.95 * self.controller.lockin_daq.signal_range))
+
+                    # Check if value too high (may cause damage to PMT) for several consecutive values
+                    pmt_limit_reached = True
+                    for i in range(1, 4):
+                        pmt_limit_reached = pmt_limit_reached and (
+                                self.controller.max_volt_history[-i] >= self.controller.shutdown_threshold)
+
+                    if range_limit_reached:
+                        self.range_limit_reached_signal.emit()
+                    if pmt_limit_reached:
+                        self.pmt_limit_reached_signal.emit()
+
+        if self.controller.stop_osc_trigger:
+            self.controller.lockin_osc_lock.acquire()
+            self.controller.lockin_osc.stop_scope()
+            self.controller.lockin_osc_lock.release()
+
+            self.controller.stop_osc_trigger = False
+
