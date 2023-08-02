@@ -3,27 +3,27 @@ import math
 import os
 import queue
 import re
+import threading as th
 import time
 
 import numpy as np
+import pandas as pd
 import pyvisa
 from PyQt5 import QtWidgets
-from PyQt5.QtCore import QTimer, QThread, pyqtSignal, QMutex, QCoreApplication, pyqtSlot, Qt
-from PyQt5.QtWidgets import QMainWindow, QApplication
-from PyQt5.QtWidgets import QMessageBox
+from PyQt5.QtCore import QTimer, QCoreApplication, Qt
+from PyQt5.QtGui import QPalette, QColor
+from PyQt5.QtWidgets import QApplication, QMainWindow
 from PyQt5.QtWidgets import QVBoxLayout, QDialog, QLabel, QPushButton
-import pandas as pd
 
 import gui
+from debug import LogObject
 from mfli import MFLI
 from mono import Monoi, Monoii
 from pem import PEM
-from debug import LogObject
-import threading as th
 
 
 # Combines the individual components and controls the main window
-class Controller(LogObject):
+class Controller(QMainWindow, LogObject):
     version = '1.0.1'
 
     lowpass_filter_risetime = 0.6  # s, depends on the timeconstant of the low pass filter
@@ -42,14 +42,15 @@ class Controller(LogObject):
     log_name = 'CTRL'
     acquisition_running = False
 
-    # Parameters to calculate approx. gain from control voltage of PMT, log(gain) = slope*pmt_voltage + offset, derived from manual
+    # Parameters to calculate approx. gain from control voltage of PMT, log(gain) = slope*pmt_voltage + offset,
+    # derived from manual
     pmt_slope = 4.913
     pmt_offset = 1.222
     max_gain = 885.6
     gain_norm = 4775.0
 
     max_volt_hist_lenght = 75  # number of data points in the signal tuning graph
-    edt_changed_color = '#FFBAC5'
+    edt_changed_color = '#FFFF80'
 
     curr_spec = np.array([[],  # wavelength
                           [],  # DC
@@ -70,14 +71,16 @@ class Controller(LogObject):
                           []])  # ellip stddev
     index_ac = 3  # in curr_spec
     index_dc = 1
-    index_glum = 9
+    index_gabs = 9
     index_lp_theta = 13
+    index_ellips = 14
 
     # averaged spectrum during measurement
     avg_spec = np.array([[],  # wavelenght
                          [],  # DC
                          [],  # AC
-                         []])  # gabs
+                         [],  # gabs
+                         []])  # ellips
 
     # variables required for phase offset calibration
     cal_running = False
@@ -90,6 +93,10 @@ class Controller(LogObject):
     def __init__(self):
         # Locks to prevent race conditions in multithreading
         super().__init__()
+        # Create window
+        self.gui = gui.Ui_MainWindow()
+        self.gui.setupUi(self)
+        self.gui.closeSignal.connect(self.on_closing)
         self.pem_lock = th.Lock()
         self.monoi_lock = th.Lock()
         self.monoii_lock = th.Lock()
@@ -100,14 +107,13 @@ class Controller(LogObject):
         self.stop_spec_trigger = [False]
         # For oscilloscope monitoring
         self.stop_osc_trigger = False
-        # For phaseoffset calibration
+        # For phase offset calibration
         self.stop_cal_trigger = [False]
         self.spec_thread = None
 
-        # Create window
-        self.gui = gui.Ui_MainWindow()
+
         self.log_queue = queue.Queue()
-        self.log_box = self.gui.edits_map["edt_debug_log"]
+        self.log_box = self.gui.debug_log
         self.assign_gui_events()
 
         if os.path.exists("last_params.txt"):
@@ -119,8 +125,16 @@ class Controller(LogObject):
         self.log_author_message()
         self.update_log()
 
-        self.ui.setupUi(self)
-        self.gui = gui.Ui_MainWindow()
+        self.log_update_interval = 100
+
+        # Create a QTimer for the log
+        self.timer = QTimer()
+        # noinspection PyUnresolvedReferences
+        self.timer.timeout.connect(self.update_log)
+        self.timer.start(self.log_update_interval)
+
+        self.timer = QTimer()
+        self.timer.timeout.connect(self.cal_end_after_thread)
 
     def set_initialized(self, init):
         self.initialized = init
@@ -195,8 +209,6 @@ class Controller(LogObject):
     def set_acquisition_running(self, b):
         self.acquisition_running = b
         self.set_active_components()
-
-    from PyQt5 import QtWidgets, QtCore
 
     def init_devices(self):
         try:
@@ -278,13 +290,12 @@ class Controller(LogObject):
             self.set_initialized(False)
             self.log('ERROR during initialization: {}!'.format(str(e)), True)
 
-
     def disconnect_devices(self):
         self.log('')
         self.log('Closing connections to devices...')
         self.set_PMT_voltage(0.0)
 
-        # stop everthing
+        # stop everything
         self.stop_osc_trigger = True
         self.stop_spec_trigger[0] = True
         self.stop_cal_trigger[0] = True
@@ -302,38 +313,37 @@ class Controller(LogObject):
             self.log('Error while closing connections: {}.'.format(str(e)), True)
 
     def on_closing(self):
-        reply = QMessageBox.question(self, 'Quit', 'Do you want to quit?',
-                                     QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+        # Here, you'll do everything that needs to be done before the window is actually closed
 
-        if reply == QMessageBox.Yes:
-            if self.spec_thread is not None:
-                if self.spec_thread.isRunning():
-                    self.abort_measurement()
-                    time.sleep(1)
-            if self.cal_theta_thread is not None:
-                if self.cal_theta_thread.isRunning():
-                    self.cal_stop_record()
-                    time.sleep(1)
+        if self.spec_thread is not None:
+            if self.spec_thread.is_alive():
+                self.abort_measurement()
+                time.sleep(1)
 
-            self.save_params('last')
+        if self.cal_theta_thread is not None:
+            if self.cal_theta_thread.is_alive():
+                self.cal_stop_record()
+                time.sleep(1)
 
-            if self.initialized:
-                self.disconnect_devices()
-            QCoreApplication.instance().quit()
-        else:
-            pass
-            # ---End of initialization/closing section---
+        self.save_params('last')
+
+        if self.initialized:
+            self.disconnect_devices()
+
+        # After completing all the tasks, exit the application
+        QCoreApplication.instance().quit()
 
     # --- Start of GUI section---
 
     def log_author_message(self):
-        self.log('CatCPL v{}'.format(self.version), False, True)
+        self.log('CD-PLOT v{}'.format(self.version), False, True)
         self.log('')
-        self.log('Author: Winald R. Kitzmann', False, True)
-        self.log('https://github.com/wkitzmann/CatCPL/', False, True)
+        self.log('Author: Langelihle (Langa) Siziba', False, True)
+        self.log('https://github.com/wkitzmann/CatCPL/', False, True)  # TODO: copy and paste the github link
         self.log('')
         self.log(
-            'CatCPL is distributed under the GNU General Public License 3.0 (https://www.gnu.org/licenses/gpl-3.0.html).',
+            'CD-PLOT is distributed under the GNU General Public License 3.0 ('
+            'https://www.gnu.org/licenses/gpl-3.0.html).',
             False, True)
         self.log('')
         self.log('Cite XX', False, True)
@@ -343,147 +353,128 @@ class Controller(LogObject):
 
     def assign_gui_events(self):
         # Device Setup
-        self.gui.btn_init.config(command=self.click_init)
-        self.gui.btn_close.config(command=self.disconnect_devices)
+        self.gui.btn_init.clicked.connect(self.click_init)
+        self.gui.btn_close.clicked.connect(self.disconnect_devices)
 
         # Signal tuning
-        self.gui.btn_set_PMT.config(command=self.click_set_pmt)
-        self.sv_pmt = tk.StringVar(name="pmt")
-        self.gui.edt_pmt.config(textvariable=self.sv_pmt)
-        self.sv_pmt.trace('w', self.edt_changed)
-        self.gui.edt_pmt.bind('<Return>', self.enter_pmt)
+        # Signal tuning
+        self.gui.btn_set_PMT.clicked.connect(self.click_set_pmt)
+        self.gui.edt_pmt.textChanged.connect(lambda: self.edt_changed(self.gui.edt_pmt))
+        self.gui.edt_pmt.returnPressed.connect(self.enter_pmt)
 
-        self.gui.btn_set_gain.config(command=self.click_set_gain)
-        self.sv_gain = tk.StringVar(name="gain")
-        self.gui.edt_gain.config(textvariable=self.sv_gain)
-        self.sv_gain.trace('w', self.edt_changed)
-        self.gui.edt_gain.bind('<Return>', self.enter_gain)
+        self.gui.btn_set_gain.clicked.connect(self.click_set_gain)
+        self.gui.edt_gain.textChanged.connect(lambda: self.edt_changed(self.gui.edt_gain))
+        self.gui.edt_gain.returnPressed.connect(self.enter_gain)
 
-        self.gui.btn_set_WL.config(command=self.click_set_signal_WL)
-        self.sv_WL = tk.StringVar(name="WL")
-        self.gui.edt_WL.config(textvariable=self.sv_WL)
-        self.sv_WL.trace('w', self.edt_changed)
-        self.gui.edt_WL.bind('<Return>', self.enter_signal_WL)
+        self.gui.btn_set_WL.clicked.connect(self.click_set_signal_WL)
+        self.gui.edt_WL.textChanged.connect(lambda: self.edt_changed(self.gui.edt_WL))
+        self.gui.edt_WL.returnPressed.connect(self.enter_signal_WL)
 
-        self.gui.cbx_range.bind('<<ComboboxSelected>>', self.change_cbx_range)
-        self.gui.btn_autorange.config(command=self.click_autorange)
+        self.gui.btn_set_phaseoffset.clicked.connect(self.click_set_phaseoffset)
+        self.gui.edt_phaseoffset.textChanged.connect(lambda: self.edt_changed(self.gui.edt_phaseoffset))
+        self.gui.edt_phaseoffset.returnPressed.connect(self.enter_phaseoffset)
 
-        self.gui.btn_set_phaseoffset.config(command=self.click_set_phaseoffset)
-        self.sv_phaseoffset = tk.StringVar(name="phaseoffset")
-        self.gui.edt_phaseoffset.config(textvariable=self.sv_phaseoffset)
-        self.sv_phaseoffset.trace('w', self.edt_changed)
-        self.gui.edt_phaseoffset.bind('<Return>', self.enter_phaseoffset)
+        self.gui.cbx_range.currentIndexChanged.connect(self.change_cbx_range)
+        self.gui.btn_autorange.clicked.connect(self.click_autorange)
 
-        self.gui.btn_cal_phaseoffset.config(command=self.click_cal_phaseoffset)
+        self.gui.btn_cal_phaseoffset.clicked.connect(self.click_cal_phaseoffset)
 
         # Spectra Setup
-        self.gui.btn_start.config(command=self.click_start_spec)
-        self.gui.btn_abort.config(command=self.click_abort_spec)
+        self.gui.btn_start.clicked.connect(self.click_start_spec)
+        self.gui.btn_abort.clicked.connect(self.click_abort_spec)
 
-        self.gui.window.protocol("WM_DELETE_WINDOW", self.on_closing)
+        # Close event
+        self.gui.closeEvent = self.on_closing
 
     # (de)activate buttons and text components depending on the state of the software
     def set_active_components(self):
-        self.gui.btn_init['state'] = self.gui.get_state_const(not self.initialized)
-        self.gui.btn_close['state'] = self.gui.get_state_const(self.initialized)
-        self.gui.set_spectra_setup_enable(not self.acquisition_running and self.initialized and not self.cal_running)
-        self.gui.set_signal_tuning_enable(not self.acquisition_running and self.initialized and not self.cal_collecting)
-        self.gui.btn_start['state'] = self.gui.get_state_const(
+        self.gui.btn_init.setEnabled(not self.initialized)
+        self.gui.btn_close.setEnabled(self.initialized)
+        self.gui.spectra_setup.setEnabled(not self.acquisition_running and self.initialized and not self.cal_running)
+        self.gui.signal_tuning.setEnabled(not self.acquisition_running and self.initialized and not self.cal_collecting)
+        self.gui.btn_start.setEnabled(not self.acquisition_running and self.initialized and not self.cal_running)
+        self.gui.btn_abort.setEnabled(self.acquisition_running and self.initialized and not self.cal_running)
+        self.gui.btn_cal_phaseoffset.setEnabled(
             not self.acquisition_running and self.initialized and not self.cal_running)
-        self.gui.btn_abort['state'] = self.gui.get_state_const(
-            self.acquisition_running and self.initialized and not self.cal_running)
-        self.gui.btn_cal_phaseoffset['state'] = self.gui.get_state_const(
-            not self.acquisition_running and self.initialized and not self.cal_running)
-        self.gui.set_cat_visible(self.initialized)
         self.update_mfli_status(self.initialized)
-        self.update_initialized_status(self.initialized)
 
     def window_update(self):
-        self.gui.window.update()
+        QApplication.processEvents()
 
     def update_log(self):
         # Handle all log messages currently in the queue, if any
-        while self.log_queue.qsize():
+        while not self.log_queue.empty():
             try:
-                msg = self.log_queue.get(0)
-                self.log_box.insert(tk.END, msg + '\n')
-                self.log_box.see(tk.END)
+                msg = self.log_queue.get(False)
+                self.gui.log_box.append(msg)
+                self.gui.log_box.ensureCursorVisible()  # This will automatically scroll to the end of the log_box
             except queue.Empty:
                 pass
-        self.gui.window.after(self.log_update_interval, self.update_log)
 
     # When the user changes a value in one of the text boxes in the Signal Tuning area
     # the text box is highlighed until the value is saved
-    def edt_changed(self, var, index, mode):
-        if var == 'pmt':
-            edt = self.gui.edt_pmt
-        elif var == 'gain':
-            edt = self.gui.edt_gain
-        elif var == 'WL':
-            edt = self.gui.edt_WL
-        elif var == 'phaseoffset':
-            edt = self.gui.edt_phaseoffset
-
-        edt.config(bg=self.edt_changed_color)
+    def edt_changed(self, edt):
+        palette = QPalette()
+        palette.setColor(QPalette.Base, QColor(self.edt_changed_color))
+        edt.setPalette(palette)
 
     def set_PMT_volt_from_edt(self):
         try:
-            v = float(self.gui.edt_pmt.get())
-            if (v <= 1.1) and (v >= 0.0):
+            v = float(self.gui.edt_pmt.text())
+            if 0.0 <= v <= 1.1:
                 self.set_PMT_voltage(v)
         except ValueError as e:
-            self.log('Error in set_PMT_voltage_from_edt: ' + str(e), True)
+            self.log(f'Error in set_PMT_voltage_from_edt: {e}', True)
 
     def set_gain_from_edt(self):
         try:
-            g = float(self.gui.edt_gain.get())
-            if (g <= self.max_gain):
+            g = float(self.gui.edt_gain.text())
+            if g <= self.max_gain:
                 self.set_PMT_voltage(self.gain_to_volt(g))
         except ValueError as e:
-            self.log('Error in set_gain_from_edt: ' + str(e), True)
+            self.log(f'Error in set_gain_from_edt: {e}', True)
 
     def set_WL_from_edt(self):
         try:
-            nm = float(self.gui.edt_WL.get())
+            nm = float(self.gui.edt_WL.text())
             self.move_nm(nm)
         except ValueError as e:
-            self.log('Error in set_WL_from_edt: ' + str(e), True)
+            self.log(f'Error in set_WL_from_edt: {e}', True)
 
     def set_phaseoffset_from_edt(self):
         try:
-            # if slef.gui.edt_phaseoffset.get() == '':
-            #   po = 0
-            po = float(self.gui.edt_phaseoffset.get())
+            po_text = self.gui.edt_phaseoffset.text()
+            po = float(po_text) if po_text else 0
             self.set_phaseoffset(po)
-            self.gui.edt_phaseoffset.config(bg='#FFFFFF')
+            self.gui.edt_phaseoffset.setStyleSheet("background-color: #FFFFFF")
         except ValueError as e:
-            self.log('Error in set_phaseoffset_from_edt: ' + str(e), True)
+            self.log(f'Error in set_phaseoffset_from_edt: {e}', True)
 
     def click_init(self):
         # deactivate init button
-        self.gui.btn_init['state'] = self.gui.get_state_const(False)
+        self.gui.btn_init.setEnabled(False)
         self.init_devices()
 
     def click_set_pmt(self):
         self.set_PMT_volt_from_edt()
 
-    def enter_pmt(self, event):
+    def enter_pmt(self):
         self.click_set_pmt()
 
     def click_set_gain(self):
         self.set_gain_from_edt()
 
-    def enter_gain(self, event):
+    def enter_gain(self):
         self.click_set_gain()
 
     def click_set_signal_WL(self):
         self.set_WL_from_edt()
 
-    def enter_signal_WL(self, event):
+    def enter_signal_WL(self):
         self.click_set_signal_WL()
 
-    def change_cbx_range(self, event):
-        self.set_input_range(float(self.gui.cbx_range.get()))
+    def change_cbx_range(self):
+        self.set_input_range(float(self.gui.cbx_range.currentText()))
 
     def click_autorange(self):
         self.set_auto_range()
@@ -491,7 +482,7 @@ class Controller(LogObject):
     def click_set_phaseoffset(self):
         self.set_phaseoffset_from_edt()
 
-    def enter_phaseoffset(self, event):
+    def enter_phaseoffset(self):
         self.click_set_phaseoffset()
 
     def click_cal_phaseoffset(self):
@@ -504,9 +495,9 @@ class Controller(LogObject):
         self.abort_measurement()
 
     def update_phaseoffset_edt(self, value: float):
-        self.set_edt_text(self.gui.edt_phaseoffset, '{:.3f}'.format(value))
+        self.gui.edt_phaseoffset.setText('{:.3f}'.format(value))
 
-    def update_progress_txt(self, start: float, stop: float, curr: float, run: int, run_count: int,
+    def update_progress_bar(self, start: float, stop: float, curr: float, run: int, run_count: int,
                             time_since_start: float):
         # Calculate progress in percent
         if stop > start:
@@ -519,7 +510,7 @@ class Controller(LogObject):
         if f > 0:
             time_left = (run_count * 100 / (f + 100 * (run - 1)) - 1) * time_since_start
 
-            # Determine proper way to display the estimated remaining time
+        # Determine proper way to display the estimated remaining time
         if time_left < 60:
             unit = 's'
         elif time_left < 3600:
@@ -529,66 +520,71 @@ class Controller(LogObject):
             unit = 'h'
             time_left = time_left / 3600
 
-        # Update label text
-        self.gui.canvas.itemconfigure(self.gui.txt_progress,
-                                      text='{:.1f} % ({:d}/{:d}), ca. {:.1f} {}'.format(f, run, run_count, time_left,
-                                                                                        unit))
+        # Update progress bar value
+        self.gui.progressBar.setValue(f)
 
-    def update_initialized_status(self, b: bool):
-        if b:
-            self.gui.canvas.itemconfigure(self.gui.txt_init, text='True')
-        else:
-            self.gui.canvas.itemconfigure(self.gui.txt_init, text='False')
+        # Update label text
+        self.gui.progressBar.setToolTip(
+            '{:.1f} % ({:d}/{:d}), ca. {:.1f} {}'.format(f, run, run_count, time_left, unit))
 
     def update_mfli_status(self, b: bool):
         if b:
-            self.gui.canvas.itemconfigure(self.gui.txt_mfli, text='connected')
+            self.gui.txt_mfli.setText('connected')
         else:
-            self.gui.canvas.itemconfigure(self.gui.txt_mfli, text='-')
+            self.gui.txt_mfli.setText('-')
 
     def update_osc_captions(self, curr: float, label):
         if not np.isnan(curr):
-            self.gui.canvas.itemconfigure(label, text='{:.1e} V'.format(curr))
+            label.setText('{:.1e} V'.format(curr))  # update QLabel text
 
     def update_osc_plots(self, max_vals):
-        self.gui.plot_osc(data_max=max_vals, max_len=self.max_volt_hist_lenght, time_step=self.osc_refresh_delay)
+        # start a QTimer to call the plot function at intervals
+        self.timer = QTimer()
+        self.timer.timeout.connect(lambda: self.gui.plot_osc(
+            data_max=max_vals,
+            max_len=self.gui.max_volt_hist_length,
+            time_step=self.gui.osc_refresh_delay
+        ))
+        self.timer.start(self.gui.osc_refresh_delay)  # start timer
 
     def update_PMT_voltage_edt(self, volt):
-        self.set_edt_text(self.gui.edt_pmt, '{:.3f}'.format(volt))
-        self.set_edt_text(self.gui.edt_gain, '{:.3f}'.format(self.volt_to_gain(volt)))
-        self.gui.edt_pmt.config(bg='#FFFFFF')
-        self.gui.edt_gain.config(bg='#FFFFFF')
-        self.window_update()
+        self.gui.edt_pmt.setText('{:.3f}'.format(volt))
+        self.gui.edt_gain.setText('{:.3f}'.format(self.volt_to_gain(volt)))
+        self.gui.edt_pmt.setStyleSheet('background-color: #FFFFFF;')
+        self.gui.edt_gain.setStyleSheet('background-color: #FFFFFF;')
+        self.window_update()  # Adjusted this method for PyQt
 
     def update_mono_edt_lbl(self, wl):
-        self.gui.canvas.itemconfigure(self.gui.txt_mono, text='{:.2f} nm'.format(wl))
-        self.set_edt_text(self.gui.edt_WL, '{:.2f}'.format(wl))
-        self.gui.edt_WL.config(bg='#FFFFFF')
+        self.gui.txt_monoi.setText('{:.2f} nm'.format(wl))
+        self.gui.txt_monoii.setText('{:.2f} nm'.format(wl))
+        self.gui.edt_WL.setText('{:.2f}'.format(wl))
+        self.gui.edt_WL.setStyleSheet('background-color: #FFFFFF;')
 
     def update_pem_lbl(self, wl):
-        self.gui.canvas.itemconfigure(self.gui.txt_PEM, text='{:.2f} nm'.format(wl))
+        self.gui.txt_PEM.setText('{:.2f} nm'.format(wl))
 
     def set_edt_text(self, edt, s):
-        state_before = edt['state']
-        edt['state'] = self.gui.get_state_const(True)
-        edt.delete(0, tk.END)
-        edt.insert(0, s)
-        edt['state'] = state_before
+        state_before = edt.isEnabled()
+        edt.setEnabled(True)
+        edt.clear()
+        edt.insert(s)
+        edt.setEnabled(state_before)
 
     def update_spec(self):
         if self.acquisition_running:
             self.gui.plot_spec(
                 tot=[self.curr_spec[0], self.curr_spec[self.index_dc]],
                 tot_avg=[self.avg_spec[0], self.avg_spec[1]],
-                cpl=[self.curr_spec[0], self.curr_spec[self.index_ac]],
-                cpl_avg=[self.avg_spec[0], self.avg_spec[2]],
-                glum=[self.curr_spec[0], self.curr_spec[self.index_glum]],
-                glum_avg=[self.avg_spec[0], self.avg_spec[3]], )
+                cd=[self.curr_spec[0], self.curr_spec[self.index_ac]],
+                cd_avg=[self.avg_spec[0], self.avg_spec[2]],
+                gabs=[self.curr_spec[0], self.curr_spec[self.index_gabs]],
+                gabs_avg=[self.avg_spec[0], self.avg_spec[3]],
+                ellips=[self.curr_spec[0], self.curr_spec[self.index_ellips]],
+                ellips_avg=[self.avg_spec[0], self.avg_spec[4]])
 
         if not self.spec_thread is None:
             if self.spec_thread.is_alive():
-                self.gui.window.after(self.spec_refresh_delay, self.update_spec)
-
+                QTimer.singleShot(self.spec_refresh_delay, self.update_spec)
                 # ----End of GUI section---
 
     # ---Start of spectra acquisition section---
@@ -609,11 +605,11 @@ class Controller(LogObject):
                     break
             return result
 
-        ac_blank = self.gui.edt_ac_blank.get()
-        dc_blank = self.gui.edt_dc_blank.get()
-        det_corr = self.gui.edt_det_corr.get()
-        filename = self.gui.edt_filename.get()
-        reps = int(self.gui.edt_rep.get())
+        ac_blank = self.gui.edt_ac_blank.text()
+        dc_blank = self.gui.edt_dc_blank.text()
+        det_corr = self.gui.edt_det_corr.text()
+        filename = self.gui.edt_filename.text()
+        reps = int(self.gui.edt_rep.text())
 
         ac_blank_exists = filename_exists_or_empty(ac_blank)
         dc_blank_exists = filename_exists_or_empty(dc_blank)
@@ -621,7 +617,6 @@ class Controller(LogObject):
 
         if not check_illegal_chars(filename):
             try:
-                # For averaged measurements add the suffix of the first scan for the filename check
                 if reps == 1:
                     s = ''
                 else:
@@ -636,16 +631,16 @@ class Controller(LogObject):
                     self.set_acquisition_running(True)
 
                     self.spec_thread = th.Thread(target=self.record_spec, args=(
-                        float(self.gui.edt_start.get()),
-                        float(self.gui.edt_end.get()),
-                        float(self.gui.edt_step.get()),
-                        float(self.gui.edt_dwell.get()),
+                        float(self.gui.edt_start.text()),
+                        float(self.gui.edt_end.text()),
+                        float(self.gui.edt_step.text()),
+                        float(self.gui.edt_dwell.text()),
                         reps,
                         filename,
                         ac_blank,
                         dc_blank,
                         det_corr,
-                        self.gui.var_pem_off.get()))
+                        self.gui.var_pem_off.isChecked()))
                     self.spec_thread.start()
                     self.update_spec()
                 else:
@@ -666,15 +661,7 @@ class Controller(LogObject):
     def record_spec(self, start_nm: float, end_nm: float, step: float, dwell_time: float, reps: int, filename: str,
                     ac_blank: str, dc_blank: str, det_corr: str, pem_off: int):
 
-        def check_lp_theta_std(lp: float) -> bool:
-            if lp < self.lp_theta_std_warning_threshold:
-                self.log(
-                    'Warning: Possibly linearly polarized emisssion at {:.2f} (lp_theta_std = {:.3f})!'.format(curr_nm,
-                                                                                                               lp),
-                    False)
-                return True
-            else:
-                return False
+        global data
 
         # try:
         self.log('')
@@ -698,7 +685,8 @@ class Controller(LogObject):
         self.avg_spec = np.array([[],  # wavelength
                                   [],  # DC
                                   [],  # AC
-                                  []])  # glum
+                                  [],  # gabs
+                                  []])  # ellips
 
         correction = ac_blank != '' or dc_blank != '' or det_corr != ''
 
@@ -708,7 +696,7 @@ class Controller(LogObject):
             inc = step
         direction = np.sign(inc)
 
-        self.update_progress_txt(0, 1, 0, 1, reps, 0)
+        self.update_progress_bar(0, 1, 0, 1, reps, 0)
 
         # Disable PEM for AC background measurement
         self.set_modulation_active(pem_off == 0)
@@ -721,25 +709,23 @@ class Controller(LogObject):
             self.log('')
             self.log('Run {}/{}'.format(i + 1, reps))
 
-            lp_detected = False
-
-            self.curr_spec = np.array([[],  # wavelenght
-                                       [],  # AC
-                                       [],  # AC stddev
-                                       [],  # DC
-                                       [],  # DC stddev
-                                       [],  # I_L
-                                       [],  # I_L stddev
-                                       [],  # I_R
-                                       [],  # I_R stddev
-                                       [],  # glum
-                                       [],  # glum stddev
-                                       [],  # lp_r
-                                       [],  # lp_r stddev
-                                       [],  # lp theta
-                                       [],  # lp theta stddev
-                                       [],  # lp
-                                       []])  # lp stddev
+            self.curr_spec = np.array(([[],  # wavelength
+                                        [],  # DC
+                                        [],  # DC stddev
+                                        [],  # CD
+                                        [],  # CD stddev
+                                        [],  # I_L
+                                        [],  # I_L stddev
+                                        [],  # I_R
+                                        [],  # I_R stddev
+                                        [],  # g_abs
+                                        [],  # g_abs stddev
+                                        [],  # ld
+                                        [],  # ld stddev
+                                        [],  # molar_ellip
+                                        [],  # molar_ellip stddev
+                                        [],  # ellip
+                                        []]))  # ellip stddev
 
             # self.log('start {}'.format(time.time()-t0))
             curr_nm = start_nm - inc
@@ -761,14 +747,12 @@ class Controller(LogObject):
                 while (j < 5) and not success and not self.stop_spec_trigger[0]:
                     # self.log('before acquire {:.3f}'.format(time.time()-t0))
                     self.lockin_daq_lock.acquire()
-                    # self.log('afer lock {:.3f}'.format(time.time()-t0))
+                    # self.log('after lock {:.3f}'.format(time.time()-t0))
                     data = self.lockin_daq.read_data(self.stop_spec_trigger)
                     # self.log('after read {:.3f}'.format(time.time()-t0))
                     self.lockin_daq_lock.release()
 
                     if not self.stop_spec_trigger[0]:
-                        # Check if there is a linearly polarized component (2f) in the signal
-                        lp_detected = lp_detected or check_lp_theta_std(data['data'][self.index_lp_theta])
                         # self.log('afeter release {:.3f}'.format(time.time()-t0))
                         success = data['success']
                     j += 1
@@ -786,7 +770,7 @@ class Controller(LogObject):
                         self.add_data_to_avg_spec(data_with_WL, i)
 
                 time_since_start = time.time() - t0
-                self.update_progress_txt(start_nm, end_nm, curr_nm, i + 1, reps, time_since_start)
+                self.update_progress_bar(start_nm, end_nm, curr_nm, i + 1, reps, time_since_start)
                 # self.log('before next step {:.3f}'.format(time.time()-t0))
 
             if self.stop_spec_trigger[0]:
@@ -808,10 +792,6 @@ class Controller(LogObject):
 
             dfall_spectra[i] = dfcurr_spec
 
-            if lp_detected:
-                self.log('')
-                self.log('Warning: Possibly linearly polarized emission!', True)
-
             i += 1
 
         self.log('Stopping data acquisition.')
@@ -823,7 +803,7 @@ class Controller(LogObject):
             self.save_spec(dfavg_spec, filename + '_avg', False)
 
             if correction:
-                dfavg_spec_corr = self.apply_corr(dfavg_spec_recalc, ac_blank, dc_blank, det_corr)
+                dfavg_spec_corr = self.apply_corr(dfavg_spec, ac_blank, dc_blank, det_corr)
                 self.save_spec(dfavg_spec_corr, filename + '_avg_corr', False)
 
         self.log('')
@@ -841,10 +821,11 @@ class Controller(LogObject):
             time.sleep(0.01)
 
     def add_data_to_avg_spec(self, data, curr_rep: int):
-        # avg_spec structure: [[WL],[DC],[AC],[glum]]
+        # avg_spec structure: [[WL],[DC],[AC],[gabs],[ellips]]
         if curr_rep == 0:
             self.avg_spec = np.hstack((self.avg_spec, np.array(
-                ([data[0][0]], [data[0][self.index_dc]], [data[0][self.index_ac]], [data[0][self.index_glum]]))))
+                ([data[0][0]], [data[0][self.index_dc]], [data[0][self.index_ac]], [data[0][self.index_gabs]],
+                 [data[0][self.index_ellips]]))))
         else:
             # find index where the wavelength of the new datapoint matches
             index = np.where(self.avg_spec[0] == data[0][0])[0]
@@ -854,15 +835,18 @@ class Controller(LogObject):
                         curr_rep + 1)
                 self.avg_spec[2][index[0]] = (self.avg_spec[2][index[0]] * curr_rep + data[0][self.index_ac]) / (
                         curr_rep + 1)
-                # recalculate glum
+                # recalculate gabs
                 self.avg_spec[3][index[0]] = 2 * self.avg_spec[2][index[0]] / self.avg_spec[1][index[0]]
+
+                # recalculate ellips
+                self.avg_spec[4][index[0]] = 2 * self.avg_spec[2][index[0]] / self.avg_spec[2][index[0]]
 
                 # converts a numpy array to a pandas DataFrame
 
     def np_to_pd(self, spec):
         df = pd.DataFrame(spec.T)
-        df.columns = ['WL', 'DC', 'DC_std', 'AC', 'AC_std', 'I_L', 'I_L_std', 'I_R', 'I_R_std', 'glum', 'glum_std',
-                      'lp_r', 'lp_r_std', 'lp_theta', 'lp_theta_std', 'lp', 'lp_std']
+        df.columns = ['WL', 'DC', 'DC_std', 'AC', 'AC_std', 'I_L', 'I_L_std', 'I_R', 'I_R_std', 'gabs', 'gabs_std',
+                      'ld', 'ld_std', 'ellip', 'ellip', 'molar_ellip', 'molar_ellip']
         df = df.set_index('WL')
         return df
 
@@ -880,19 +864,19 @@ class Controller(LogObject):
             dfavg['DC_std'] = dfavg['DC_std'] + (dfspectra[i]['DC_std'] / count) ** 2
             dfavg['AC'] = dfavg['AC'] + dfspectra[i]['AC'] / count
             dfavg['AC_std'] = dfavg['AC_std'] + (dfspectra[i]['AC_std'] / count) ** 2
-            dfavg['lp_r'] = dfavg['lp_r'] + dfspectra[i]['lp_r'] / count
-            dfavg['lp_r_std'] = dfavg['lp_r_std'] + (dfspectra[i]['lp_r_std'] / count) ** 2
-            dfavg['lp_theta'] = dfavg['lp_theta'] + dfspectra[i]['lp_theta'] / count
-            dfavg['lp_theta_std'] = dfavg['lp_theta_std'] + (dfspectra[i]['lp_theta_std'] / count) ** 2
-            dfavg['lp'] = dfavg['lp'] + dfspectra[i]['lp'] / count
-            dfavg['lp_std'] = dfavg['lp_std'] + (dfspectra[i]['lp_std'] / count) ** 2
+            dfavg['ld'] = dfavg['ld'] + dfspectra[i]['ld'] / count
+            dfavg['ld_std'] = dfavg['ld_std'] + (dfspectra[i]['ld_std'] / count) ** 2
+            dfavg['mollar_ellips'] = dfavg['mollar_ellips'] + dfspectra[i]['mollar_ellips'] / count
+            dfavg['molar_ellips_std'] = dfavg['molar_ellips_std'] + (dfspectra[i]['molar_ellips_std'] / count) ** 2
+            dfavg['ellips'] = dfavg['ellips'] + dfspectra[i]['ellips'] / count
+            dfavg['ellips_std'] = dfavg['ellips_std'] + (dfspectra[i]['ellips_std'] / count) ** 2
         dfavg['AC_std'] = dfavg['AC_std'] ** (0.5)
         dfavg['DC_std'] = dfavg['DC_std'] ** (0.5)
-        dfavg['lp_r_std'] = dfavg['lp_r_std'] ** (0.5)
-        dfavg['lp_theta_std'] = dfavg['lp_theta_std'] ** (0.5)
-        dfavg['lp_std'] = dfavg['lp_std'] ** (0.5)
+        dfavg['ld_std'] = dfavg['ld_std'] ** (0.5)
+        dfavg['molar_ellips_std'] = dfavg['molar_ellips_std'] ** (0.5)
+        dfavg['ellips_std'] = dfavg['ellips_std'] ** (0.5)
 
-        dfavg = self.calc_cpl(dfavg)
+        dfavg = self.calc_cd(dfavg)
 
         return dfavg
 
@@ -907,10 +891,10 @@ class Controller(LogObject):
             last_WL_corr = df_corr.index[-1]
 
             # Check if the wavelength region in dfspec is covered by df_det_corr
-            WL_region_ok = min(first_WL_spec, last_WL_spec) >= min(first_WL_corr, last_WL_corr) and max(first_WL_spec,
-                                                                                                        last_WL_spec) <= max(
-                first_WL_corr, last_WL_corr)
-            # Check if the measured wavelength values are available in the correction file (for AC and DC without interpolation)
+            WL_region_ok = min(first_WL_spec, last_WL_spec) >= min(first_WL_corr, last_WL_corr) and \
+                           max(first_WL_spec, last_WL_spec) <= max(first_WL_corr, last_WL_corr)
+            # Check if the measured wavelength values are available in the correction file (for AC and DC without
+            # interpolation)
             values_ok = not check_index or dfspec.index.isin(df_corr.index).all()
 
             return WL_region_ok and values_ok
@@ -923,7 +907,8 @@ class Controller(LogObject):
             dfspec_nan.iloc[:, 0] = float('NaN')
 
             nonlocal df_det_corr
-            # Add the measured wavelengths to the correction data, missing values in the correction data will be set to NaN
+            # Add the measured wavelengths to the correction data, missing values in the correction data will be set
+            # to NaN
             df_det_corr = pd.concat([df_det_corr, dfspec_nan], axis=1).drop('nan', axis=1)
             # Interpolate missing values in the correction data
             df_det_corr = df_det_corr.interpolate(method='index')
@@ -939,7 +924,7 @@ class Controller(LogObject):
             self.log('Detector sensitivity correction with {}'.format(".\\data\\" + det_corr + ".csv"))
             df_det_corr = pd.read_csv(filepath_or_buffer=".\\data\\" + det_corr + ".csv", sep=',', index_col='WL')
 
-            if is_corr_suitable(df_det_corr, False):
+            if is_suitable(df_det_corr, False):
                 interpolate_detcorr()
                 dfspec['DC'] = dfspec['DC'] / df_det_corr.iloc[:, 0]
                 dfspec['DC_std'] = dfspec['DC_std'] / df_det_corr.iloc[:, 0]
@@ -953,7 +938,7 @@ class Controller(LogObject):
             self.log('AC blank correction with {}'.format(".\\data\\" + ac_blank + ".csv"))
             df_ac_blank = pd.read_csv(filepath_or_buffer=".\\data\\" + ac_blank + ".csv", sep=',', index_col='WL')
 
-            if is_corr_suitable(df_ac_blank, True):
+            if is_suitable(df_ac_blank, True):
                 dfspec['AC'] = dfspec['AC'] - df_ac_blank['AC']
                 dfspec['AC_std'] = ((dfspec['AC_std'] / 2) ** 2 + (df_ac_blank['AC_std'] / 2) ** 2) ** 0.5
             else:
@@ -964,7 +949,7 @@ class Controller(LogObject):
             self.log('DC blank correction with {}'.format(".\\data\\" + dc_blank + ".csv"))
             df_dc_blank = pd.read_csv(filepath_or_buffer=".\\data\\" + dc_blank + ".csv", sep=',', index_col='WL')
 
-            if is_corr_suitable(df_dc_blank, True):
+            if is_suitable(df_dc_blank, True):
                 dfspec['DC'] = dfspec['DC'] - df_dc_blank['DC']
                 dfspec['DC_std'] = ((dfspec['DC_std'] / 2) ** 2 + (df_dc_blank['DC_std'] / 2) ** 2) ** 0.5
             else:
@@ -975,18 +960,19 @@ class Controller(LogObject):
         # The user must make sure that the blank files contain the correct values for the measurement
         dfspec = dfspec.dropna(axis=0)
 
-        dfspec = self.calc_cpl(dfspec)
+        dfspec = self.calc_cd(dfspec)
         return dfspec
 
-    def calc_cpl(self, df):
+    def calc_cd(self, df):
         df['I_L'] = (df['AC'] + df['DC'])
         df['I_R'] = (df['DC'] - df['AC'])
-        df['glum'] = 2 * df['AC'] / df['DC']
+        df['gabs'] = (df['I_L'] - df['I_R']) / (df['I_L'] - df['I_R'])
         # Gaussian error progression
         df['I_L_std'] = ((df['AC_std']) ** 2 + (df['DC_std']) ** 2) ** 0.5
         df['I_R_std'] = df['I_L_std'].copy()
-        df['glum_std'] = ((2 * df['AC_std'] / df['DC']) ** 2 + (
-                2 * df['AC'] / (df['DC'] ** 2) * df['DC_std']) ** 2) ** 0.5
+        df['gabs_std'] = ((4 * df['I_R'] ** 2 / (df['I_L'] + df['I_R']) ** 4) * df['I_L_std'] ** 2
+                          + (4 * df['I_L'] ** 2 / (df['I_L'] + df['I_R']) ** 4) * df['I_R_std'] ** 2) ** 0.5
+
         return df
 
     def save_spec(self, dfspec, filename, savefig=True):
@@ -999,27 +985,24 @@ class Controller(LogObject):
 
     def save_params(self, filename):
         with open(filename + '_params.txt', 'w') as f:
-            f.write('Specta Name = {}\n'.format(self.gui.edt_filename.get()))
+            f.write('Specta Name = {}\n'.format(self.gui.edt_filename.text()))
             f.write('Time = {}\n\n'.format(time.asctime(time.localtime(time.time()))))
             f.write('Setup parameters\n')
-            f.write('Start WL = {} nm\n'.format(self.gui.edt_start.get()))
-            f.write('End WL = {} nm\n'.format(self.gui.edt_end.get()))
-            f.write('Step = {} nm\n'.format(self.gui.edt_step.get()))
-            f.write('Dwell time = {} s\n'.format(self.gui.edt_dwell.get()))
-            f.write('Repetitions = {}\n'.format(self.gui.edt_rep.get()))
-            f.write('Exc. slit = {} nm\n'.format(self.gui.edt_excSlit.get()))
-            f.write('Em. slit = {} nm\n'.format(self.gui.edt_emSlit.get()))
-            f.write('Exc. WL = {} nm\n'.format(self.gui.edt_excWL.get()))
-            f.write('Comment = {}\n'.format(self.gui.edt_comment.get()))
-            f.write('AC-Blank-File = {}\n'.format(self.gui.edt_ac_blank.get()))
-            f.write('DC-Blank-File = {}\n'.format(self.gui.edt_dc_blank.get()))
-            f.write('PEM off = {:d}\n'.format(self.gui.var_pem_off.get()))
-            f.write('Detector Correction File = {}\n'.format(self.gui.edt_det_corr.get()))
-            f.write('PMT voltage = {} V\n'.format(self.gui.edt_pmt.get()))
-            f.write('PMT gain = {}\n'.format(self.gui.edt_gain.get()))
-            f.write('Input range = {}\n'.format(self.gui.cbx_range.get()))
-            f.write('Phase offset = {} deg\n'.format(self.gui.edt_phaseoffset.get()))
-            f.close()
+            f.write('Start WL = {} nm\n'.format(self.gui.edt_start.text()))
+            f.write('End WL = {} nm\n'.format(self.gui.edt_end.text()))
+            f.write('Step = {} nm\n'.format(self.gui.edt_step.text()))
+            f.write('Dwell time = {} s\n'.format(self.gui.edt_dwell.text()))
+            f.write('Repetitions = {}\n'.format(self.gui.edt_rep.text()))
+            f.write('Exc. WL = {} nm\n'.format(self.gui.edt_excWL.text()))
+            f.write('Comment = {}\n'.format(self.gui.edt_comment.text()))
+            f.write('AC-Blank-File = {}\n'.format(self.gui.edt_ac_blank.text()))
+            f.write('DC-Blank-File = {}\n'.format(self.gui.edt_dc_blank.text()))
+            f.write('PEM off = {:d}\n'.format(self.gui.var_pem_off.isChecked()))
+            f.write('Detector Correction File = {}\n'.format(self.gui.edt_det_corr.text()))
+            f.write('PMT voltage = {} V\n'.format(self.gui.edt_pmt.text()))
+            f.write('PMT gain = {}\n'.format(self.gui.edt_gain.text()))
+            f.write('Input range = {}\n'.format(self.gui.cbx_range.currentText()))
+            f.write('Phase offset = {} deg\n'.format(self.gui.edt_phaseoffset.text()))
         self.log('Parameters saved as: {}'.format(".\\data\\" + filename + '_params.txt'))
 
     def abort_measurement(self):
@@ -1030,9 +1013,9 @@ class Controller(LogObject):
         self.reactivate_after_abort()
 
     def reactivate_after_abort(self):
-        if not self.spec_thread is None:
+        if self.spec_thread is not None:
             if self.spec_thread.is_alive():
-                self.gui.window.after(500, self.reactivate_after_abort)
+                QTimer.singleShot(500, self.reactivate_after_abort)  # QTimer.singleShot() accepts milliseconds
             else:
                 self.set_acquisition_running(False)
         else:
@@ -1057,7 +1040,7 @@ class Controller(LogObject):
             self.gui.canvas.itemconfigure(self.gui.txt_PEM, text='off')
 
     def set_phaseoffset(self, value):
-        if initialized:
+        if self.initialized:
             self.lockin_daq_lock.acquire()
             self.lockin_daq.set_phaseoffset(value)
             self.lockin_daq_lock.release()
@@ -1066,9 +1049,11 @@ class Controller(LogObject):
         self.log('')
         self.log('Move to {} nm'.format(nm))
         if self.initialized:
-            # The WL changes in PEM and Monochromator are done in separate threads to save time
-            mono_thread = th.Thread(target=self.mono_move, args=(nm,))
-            mono_thread.start()
+            # The WL changes in PEM and Monochromators are done in separate threads to save time
+            monoi_thread = th.Thread(target=self.monoi_move, args=(nm,))
+            monoii_thread = th.Thread(target=self.monoii_move, args=(nm,))
+            monoi_thread.start()
+            monoii_thread.start()
 
             if move_pem:
                 self.pem_lock.acquire()
@@ -1076,7 +1061,7 @@ class Controller(LogObject):
                 self.pem_lock.release()
                 self.update_pem_lbl(nm)
 
-            while mono_thread.is_alive():
+            while monoi_thread.is_alive() and monoii_thread.is_alive():
                 time.sleep(0.02)
 
             self.update_mono_edt_lbl(nm)
@@ -1088,10 +1073,15 @@ class Controller(LogObject):
         else:
             self.log('Instruments not initialized!', True)
 
-    def mono_move(self, nm):
-        self.mono_lock.acquire()
-        self.mono.set_nm(nm)
-        self.mono_lock.release()
+    def monoi_move(self, nm):
+        self.monoi_lock.acquire()
+        self.monoi.set_nm(nm)
+        self.monoi_lock.release()
+
+    def monoii_move(self, nm):
+        self.monoii_lock.acquire()
+        self.monoii.set_nm(nm)
+        self.monoii_lock.release()
 
     def volt_to_gain(self, volt):
         return 10 ** (volt * self.pmt_slope + self.pmt_offset) / self.gain_norm
@@ -1115,9 +1105,8 @@ class Controller(LogObject):
             self.log('Error in set_PMT_voltage: ' + str(e), True)
 
     def rescue_pmt(self):
-        self.log('Signal ({:.2f} V) higher than threshold ({:.2f} V)!! Setting PMT to 0 V'.format(self.max_volt,
-                                                                                                  self.shutdown_threshold),
-                 True)
+        self.log('Signal ({:.2f} V) higher than threshold ({:.2f} V)!! '
+                 'Setting PMT to 0 V'.format(self.max_volt, self.shutdown_threshold), True)
         self.set_PMT_voltage(0.0)
 
     def set_input_range(self, f):
@@ -1158,8 +1147,9 @@ class Controller(LogObject):
         self.update_osc_captions(self.max_volt, self.gui.txt_maxVolt)
         self.update_osc_captions(self.avg_volt, self.gui.txt_avgVolt)
         self.update_osc_plots(max_vals=np.asarray(self.max_volt_history))
+
         if self.monit_thread.is_alive():
-            self.gui.window.after(self.osc_refresh_delay, self.refresh_osc)
+            QTimer.singleShot(self.osc_refresh_delay, self.refresh_osc)
 
     # Collects current max. voltage in self.max_volt_history, will be executed in separate thread
     def monit_osc_loop(self):
@@ -1279,9 +1269,9 @@ class Controller(LogObject):
             self.set_phaseoffset(self.cal_new_value)
 
     def cal_end_after_thread(self):
-        if not self.cal_theta_thread is None:
+        if self.cal_theta_thread is not None:
             if self.cal_theta_thread.is_alive():
-                self.gui.window.after(100, self.cal_end_after_thread)
+                self.timer.start(100)
             else:
                 self.cal_end()
         else:
@@ -1292,7 +1282,7 @@ class Controller(LogObject):
         self.cal_running = False
         self.stop_cal_trigger[0] = False
         self.set_active_components()
-        self.cal_window.window.destroy()
+        self.cal_window.close()
 
         self.log('')
         self.log('End of phase calibration.')
@@ -1300,4 +1290,170 @@ class Controller(LogObject):
         # Save new calibration in last parameters file
         self.save_params('last')
 
-    # ---Phase offset calibration section end---
+
+
+class PhaseOffsetCalibrationDialog(QDialog):
+    update_interval = 1000  # ms
+
+    log_name = 'CAL'
+
+    new_offset = 0.0
+    current_average = 0.0
+    current_datapoints_count = 0
+
+    skipped_pos_cal = False
+    skipped_neg_cal = False
+
+    def __init__(self, ctrl):
+        super().__init__()
+        self.controller = ctrl
+
+        self.setWindowTitle('Phaseoffset Calibration')
+        self.setWindowFlag(Qt.WindowCloseButtonHint, False)  # Disable X button
+        self.setFixedSize(500, 400)  # Disable resizing
+
+        self.layout = QVBoxLayout(self)
+
+        # TODO: find out what the best phase calibration should be
+        self.lbl_text = QLabel(
+            'Insert a sample, move to a suitable wavelength and adjust gain to obtain strong positive CPL (e.g. Eu('
+            'facam)3 in DMSO at 613 nm)',
+            self)
+        self.layout.addWidget(self.lbl_text)
+        self.lbl_time = QLabel('Time passed (>1200 s recommended): 0 s', self)
+        self.layout.addWidget(self.lbl_time)
+        self.lbl_datapoints = QLabel('Number of data points: 0', self)
+        self.layout.addWidget(self.lbl_datapoints)
+        self.lbl_average = QLabel('Average phase: 0 deg', self)
+        self.layout.addWidget(self.lbl_average)
+        self.lbl_avg_pos = QLabel('Average pos. phase: --', self)
+        self.layout.addWidget(self.lbl_avg_pos)
+        self.lbl_avg_neg = QLabel('Average neg. phase: --', self)
+        self.layout.addWidget(self.lbl_avg_neg)
+
+        self.btn_next = QPushButton('Next', self)
+        self.btn_next.clicked.connect(self.next_step)
+        self.layout.addWidget(self.btn_next)
+        self.btn_skip = QPushButton('Skip', self)
+        self.btn_skip.clicked.connect(self.skip)
+        self.layout.addWidget(self.btn_skip)
+        self.btn_close = QPushButton('Close', self)
+        self.btn_close.clicked.connect(self.close)
+        self.layout.addWidget(self.btn_close)
+
+        self.step = 0
+        self.t0 = 0.0
+
+        self.timer = QTimer(self)
+        self.timer.timeout.connect(self.update_loop)
+
+    def next_step(self):
+        self.step += 1
+
+        if self.step == 1:
+            self.lbl_text.config(text='Collecting phase of positive CPL ')
+            self.t0 = time.time()
+            self.timer.start(self.update_interval)
+            self.controller.cal_start_record_thread(positive=True)
+
+        elif self.step == 2:
+            self.controller.cal_stop_record()
+            if self.skipped_pos_cal:
+                self.lbl_avg_pos.config(text='Average pos. phase: skipped')
+            else:
+                current_values = self.controller.cal_get_current_values()
+                self.lbl_avg_pos.config(text='Average pos. phase: {:.3f} deg'.format(current_values[0]))
+            self.reset_labels()
+            self.lbl_text.config(
+                text='Insert a sample, move to a suitable wavelength and adjust gain to obtain strong negative CPL (e.g. Eu(facam)3 in DMSO at 595 nm)')
+
+        elif self.step == 3:
+            self.lbl_text.config(text='Collecting phase of negative CPL')
+            self.t0 = time.time()
+            self.timer.start(self.update_interval)
+            self.controller.cal_start_record_thread(positive=False)
+
+        elif self.step == 4:
+            self.controller.cal_stop_record()
+            # wait for cal_theta_thread to stop
+            self.show_summary_after_thread()
+
+        elif self.step == 5:
+            self.controller.cal_apply_new()
+            self.controller.cal_end()
+            self.deleteLater()
+
+    # wait for the measurement thread to finish before showing the results
+    def show_summary_after_thread(self):
+        if not self.controller.cal_theta_thread is None:
+            if self.controller.cal_theta_thread.is_alive():
+                QTimer.singleShot(100, self.show_summary_after_thread)
+            else:
+                self.show_summary()
+        else:
+            self.show_summary()
+
+    def show_summary(self):
+        if self.skipped_neg_cal:
+            self.lbl_avg_neg.config(text='Average neg. phase: skipped')
+        else:
+            current_values = self.controller.cal_get_current_values()
+            self.lbl_avg_neg.config(text='Average neg. phase: {:.3f} deg'.format(current_values[0]))
+
+        self.new_offset = self.controller.cal_get_new_phaseoffset(self.skipped_pos_cal, self.skipped_neg_cal)
+        self.btn_skip['state'] = 'disabled'
+
+        if self.skipped_pos_cal and self.skipped_neg_cal:
+            self.lbl_text.config(text='Calibration was skipped.')
+            self.btn_next['state'] = 'disabled'
+        else:
+            self.lbl_text.config(
+                text='The new phase offset was determined to: {:.3f} degrees. Do you want to apply this value?'.format(
+                    self.new_offset))
+            self.btn_next.config(text='Save')
+
+    def skip(self):
+        if self.step == 0:
+            self.log('Pos. phase: skipped')
+            self.skipped_pos_cal = True
+            self.step += 1
+            self.next_step()
+        elif self.step == 1:
+            self.log('Pos. phase: skipped')
+            self.skipped_pos_cal = True
+            self.next_step()
+        elif self.step == 2:
+            self.log('Neg. phase: skipped')
+            self.skipped_neg_cal = True
+            self.step += 1
+            self.next_step()
+        elif self.step == 3:
+            self.log('Neg. phase: skipped')
+            self.skipped_neg_cal = True
+            self.next_step()
+
+    def update_loop(self):
+        if self.step in [1, 3] and self.controller.cal_running:
+            self.lbl_time.config(text='Time passed (>1200 s recommended): {:.0f} s'.format(time.time() - self.t0))
+            current_values = self.controller.cal_get_current_values()
+            self.lbl_average.config(text='Average phase: {:.3f} deg'.format(current_values[0]))
+            self.lbl_datapoints.config(text='Number of data points: {}'.format(current_values[1]))
+            self.timer.start(self.update_interval)
+
+    def reset_labels(self):
+        self.lbl_time.config(text='Time passed (>1200 s recommended): 0 s')
+        self.lbl_average.config(text='Average phase: 0 deg')
+        self.lbl_datapoints.config(text='Number of data points: 0')
+
+    def close(self):
+        self.log('Calibration aborted.')
+        if self.step in [1, 3]:
+            self.controller.cal_stop_record()
+        self.controller.cal_end_after_thread()
+        self.deleteLater()
+
+    def disable_event(self):
+        pass
+
+    def closeEvent(self, event):
+        self.close()

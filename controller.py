@@ -37,7 +37,8 @@ class Controller(QMainWindow, LogObject):
     log_name = 'CTRL'
     acquisition_running = False
 
-    # Parameters to calculate approx. gain from control voltage of PMT, log(gain) = slope*pmt_voltage + offset, derived from manual
+    # Parameters to calculate approx. gain from control voltage of PMT, log(gain) = slope*pmt_voltage + offset,
+    # derived from manual
     pmt_slope = 4.913
     pmt_offset = 1.222
     max_gain = 885.6
