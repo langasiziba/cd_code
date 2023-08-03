@@ -109,7 +109,7 @@ class Controller(QMainWindow, LogObject):
 
         # Create GUI
         self.ui = gui.Ui_MainWindow()
-        self.ui.setupUi(self)
+        self.ui.setupUi()
         self.gui = gui.Ui_MainWindow()
 
         # Setup log queue and log box

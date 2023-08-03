@@ -26,7 +26,7 @@ class LogObject(QObject):
         self.error_emitted = False
 
     def log(self, s: str, error: bool = False, no_id: bool = False):
-        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        timestamp = datetime.now().strftime("%H:%M:%S")
         ss = '[{}] {}'.format(timestamp, s)
         if not no_id:
             ss = '[{}] {}'.format(self.log_name, ss)
@@ -35,15 +35,12 @@ class LogObject(QObject):
             self.log_queue.put(ss)
             if not no_id:
                 self.show_error_box(ss)
-            if not self.error_emitted:
                 self.log_signal.emit(ss)
-                self.error_emitted = True
         elif not self.log_queue.full():
             self.log_queue.put(ss)
-            self.log_signal.emit(ss)
             self.error_emitted = False
-
-    # Rest of the class implementation...
+        # Always emit the signal regardless of whether an error occurred or not
+        self.log_signal.emit(ss)
 
     def log_ask(self, q: str):
         self.log('<< {}'.format(q))

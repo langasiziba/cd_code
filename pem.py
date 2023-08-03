@@ -42,8 +42,8 @@ class PEM(VisaDevice):
                 self.initialized = True  # The initialized flag should be accessed with self
                 return True
             else:
-                super().log("Fail to initialize.", error=True)  # Emit a log signal for initialization failure
-                super().log("Test failed. Try reconnecting PEM.")
+                self.log("Fail to initialize.", error=True)  # Emit a log signal for initialization failure
+                self.log("Test failed. Try reconnecting PEM.")
                 return False
         except Exception as e:
             self.log("Error connecting to: " + self.name + ". " + str(e), error=True, no_id=False)

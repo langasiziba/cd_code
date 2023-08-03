@@ -1,5 +1,5 @@
 from PyQt5.QtCore import (QCoreApplication, QRect,
-                          Qt, pyqtSignal)
+                          Qt, pyqtSignal, pyqtSlot, QMetaObject)
 from PyQt5.QtGui import (QCursor, QFont, QDoubleValidator)
 from PyQt5.QtWidgets import (QGroupBox, QLabel,
                              QLineEdit, QPlainTextEdit, QProgressBar,
@@ -10,13 +10,20 @@ from matplotlib import ticker
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
 
+from debug import LogObject
+
 
 class Ui_MainWindow(QMainWindow):
     closeSignal = pyqtSignal()
 
     def __init__(self):
         super().__init__()
-        self.oscilloscope_thread = None
+        self.logObject = LogObject()
+        self.logObject.log_signal.connect(self.append_to_log)
+
+    @pyqtSlot(str)
+    def append_to_log(self, text):
+        self.debug_log.appendPlainText(text)  # Assuming debug_log_textedit is your QTextEdit widget
 
     def closeEvent(self, event):
         reply = QMessageBox.question(self, 'Quit', "Do you want to quit?",
@@ -27,9 +34,7 @@ class Ui_MainWindow(QMainWindow):
         else:
             event.ignore()
 
-    def plot(self, fig, canvas, ax, xlabel, ylabel, title, data, avgdata=None):
-        if avgdata is None:
-            avgdata = []
+    def plot(self, fig, canvas, ax, xlabel, ylabel, title, data, avgdata=[]):
         ax.clear()
 
         formatter = ticker.ScalarFormatter(useMathText=True)
@@ -47,6 +52,21 @@ class Ui_MainWindow(QMainWindow):
             if len(avgdata[0]) == len(avgdata[1]) and len(avgdata[0]) > 0:
                 ax.plot(avgdata[0], avgdata[1])
 
+        fig.subplots_adjust(
+            left=0.05,
+            bottom=0.1,
+            right=0.985,
+            top=0.985,
+            wspace=0.0,
+            hspace=0.0)
+
+        if fig == self.osc_fig:
+            ax.set_facecolor("#C3C3FF")
+            fig.set_facecolor("#C3C3FF")
+        elif fig in [self.gabs_fig, self.cd_fig, self.ld_fig, self.ellips_fig]:
+            ax.set_facecolor("#C3FFFF")
+            fig.set_facecolor("#C3FFFF")
+
         canvas.draw()
 
     def plot_osc(self, data_max, max_len, time_step):
@@ -54,6 +74,56 @@ class Ui_MainWindow(QMainWindow):
                   data=[[-(min(max_len, data_max.size) - i) / (time_step / 10) for i in range(0, data_max.size)],
                         data_max],
                   xlabel='', ylabel='', title='')
+
+    def plot_spec(self, fig, canvas, ax, tot=[], tot_avg=[], cd=[], cd_avg=[], gabs=[], gabs_avg=[], ellips=[],
+                  ellips_avg=[], title=''):
+        ax.clear()
+
+        formatter = ticker.ScalarFormatter(useMathText=True)
+        formatter.set_scientific(True)
+        formatter.set_powerlimits((0, 0))
+
+        ax.set_xlabel('', fontsize=10)
+        ax.set_ylabel('', fontsize=10)
+        ax.set_title(title, fontsize=10)
+        ax.yaxis.set_major_formatter(formatter)
+
+        if tot:
+            ax.plot(tot[0], tot[1])
+
+        if tot_avg:
+            ax.plot(tot_avg[0], tot_avg[1])
+
+        if cd:
+            ax.plot(cd[0], cd[1])
+
+        if cd_avg:
+            ax.plot(cd_avg[0], cd_avg[1])
+
+        if gabs:
+            ax.plot(gabs[0], gabs[1])
+
+        if gabs_avg:
+            ax.plot(gabs_avg[0], gabs_avg[1])
+
+        if ellips:
+            ax.plot(ellips[0], ellips[1])
+
+        if ellips_avg:
+            ax.plot(ellips_avg[0], ellips_avg[1])
+
+        fig.subplots_adjust(
+            left=0.2,
+            bottom=0.07,
+            right=0.95,
+            top=0.95,
+            wspace=0.0,
+            hspace=0.4)
+
+        ax.set_facecolor("#FFF9EF")
+        fig.set_facecolor("#FFEDCC")
+        ax.axhline(y=0.0, color="#0000004E", linestyle='-')
+        canvas.draw()
 
     def setupUi(self, MainWindow):
         if not MainWindow.objectName():
@@ -131,28 +201,27 @@ class Ui_MainWindow(QMainWindow):
         self.signaltuning_group.setEnabled(False)
 
         # Oscilloscope Figure
-        self.osc_groupbox = self.signaltuning_group
         # Create the figure
-        self.osc_fig = Figure(figsize=(6, 5), dpi=50)
-        self.osc_fig.set_facecolor("#FFFAD5")
+        self.osc_fig = Figure(figsize=(7, 5.5), dpi=50)
         # Create the subplot
         self.osc_ax = self.osc_fig.add_subplot(111)
-        self.osc_ax.set_facecolor("#FFFDF1")
-        self.osc_ax.set_ylabel('', fontsize=8)
+        self.osc_ax.set_ylabel('', fontsize=10)
+        self.osc_fig.set_facecolor("#C3C3FF")
         # Create the canvas
+        self.osc_widget = QWidget(self.signaltuning_group)
         self.osc_canvas = FigureCanvas(self.osc_fig)
         # Add the canvas to the groupbox
-        osc_layout = QVBoxLayout(self.osc_groupbox)
+        osc_layout = QVBoxLayout(self.osc_widget)
         osc_layout.addWidget(self.osc_canvas)
         # Set up the canvas
         self.osc_fig.subplots_adjust(
-            left=0.12,
-            bottom=0.2,
+            left=0.05,
+            bottom=0.1,
             right=0.985,
-            top=0.88,
+            top=0.985,
             wspace=0.0,
             hspace=0.0)
-        self.osc_canvas.setGeometry(15, 30, 321, 191)
+        self.osc_widget.setGeometry(20, 20, 321, 191)
         self.osc_canvas.draw()
 
         self.label_9 = QLabel(self.signaltuning_group)
@@ -282,10 +351,6 @@ class Ui_MainWindow(QMainWindow):
         self.spectrasetup_group.setStyleSheet(u"background-color: rgb(195, 235, 255)")
         self.spectrasetup_group.setEnabled(False)
 
-        self.var_pem_off = QCheckBox(self.spectrasetup_group)
-        self.var_pem_off.setObjectName(u"var_pem_off")
-        self.var_pem_off.setGeometry(QRect(140, 460, 121, 16))
-
         self.edt_start = QLineEdit(self.spectrasetup_group)
         self.edt_start.setObjectName(u"edt_start")
         self.edt_start.setGeometry(QRect(140, 60, 155, 21))
@@ -375,6 +440,11 @@ class Ui_MainWindow(QMainWindow):
         self.edt_comment.setGeometry(QRect(140, 500, 191, 91))
         self.edt_comment.setFont(font2)
         self.edt_comment.setStyleSheet(u"background-color: rgb(255, 255, 255)")
+
+        self.var_pem_off = QCheckBox(self.spectrasetup_group)
+        self.var_pem_off.setObjectName(u"var_pem_off")
+        self.var_pem_off.setGeometry(QRect(140, 460, 121, 16))
+
         self.btn_start = QPushButton(self.spectrasetup_group)
         self.btn_start.setObjectName(u"btn_start")
         self.btn_start.setGeometry(QRect(100, 720, 81, 31))
@@ -402,11 +472,6 @@ class Ui_MainWindow(QMainWindow):
         self.label_33.setObjectName(u"label_33")
         self.label_33.setGeometry(QRect(140, 640, 71, 16))
         self.label_33.setFont(font2)
-        self.set_path = QPushButton(self.spectrasetup_group)
-        self.set_path.setObjectName(u"set_path")
-        self.set_path.setGeometry(QRect(280, 460, 51, 24))
-        self.set_path.setFont(font4)
-        self.set_path.setStyleSheet(u"background-color: rgb(255, 255, 255)")
         self.path_input = QLineEdit(self.spectrasetup_group)
         self.path_input.setObjectName(u"path_input")
         self.path_input.setGeometry(QRect(140, 460, 155, 21))
@@ -423,100 +488,100 @@ class Ui_MainWindow(QMainWindow):
         self.spectra_group.setStyleSheet(u"background-color: rgb(195, 255, 255)")
         self.spectra_group.setEnabled(False)
 
+
         # gabs
         # Create the figure
-        self.gabs_fig = Figure(figsize=(6, 5), dpi=50)
-        self.gabs_fig.set_facecolor("#FFFAD5")
+        self.gabs_fig = Figure(figsize=(7, 5.5), dpi=50)
         # Create the subplot
         self.gabs_ax = self.gabs_fig.add_subplot(111)
-        self.gabs_ax.set_facecolor("#FFFDF1")
-        self.gabs_ax.set_ylabel('', fontsize=8)
+        self.gabs_fig.set_facecolor("#C3FFFF")
+        self.gabs_ax.set_ylabel('', fontsize=10)
         # Create the canvas
         self.gabs_canvas = FigureCanvas(self.gabs_fig)
-        # Add the canvas to the groupbox
-        gabs_layout = QVBoxLayout(self.spectra_group)
-        gabs_layout.addWidget(self.gabs_canvas)
+        self.gabs_widget = QWidget(self.spectra_group)
+        self.gabs_layout = QVBoxLayout(self.gabs_widget)
+        self.gabs_layout.addWidget(self.gabs_canvas)
         # Set up the canvas
         self.gabs_fig.subplots_adjust(
-            left=0.12,
-            bottom=0.2,
+            left=0.05,
+            bottom=0.1,
             right=0.985,
-            top=0.88,
+            top=0.985,
             wspace=0.0,
             hspace=0.0)
-        self.gabs_canvas.setGeometry(20, 60, 321, 201)
+        self.gabs_widget.setGeometry(20, 60, 321, 201)
         self.gabs_canvas.draw()
 
         # cd
         # Create the figure
-        self.cd_fig = Figure(figsize=(6, 5), dpi=50)
-        self.cd_fig.set_facecolor("#FFFAD5")
+        self.cd_fig = Figure(figsize=(7, 5.5), dpi=50)
         # Create the subplot
         self.cd_ax = self.cd_fig.add_subplot(111)
-        self.cd_ax.set_facecolor("#FFFDF1")
-        self.cd_ax.set_ylabel('', fontsize=8)
+        self.cd_fig.set_facecolor("#C3FFFF")
+        self.cd_ax.set_ylabel('', fontsize=10)
         # Create the canvas
         self.cd_canvas = FigureCanvas(self.cd_fig)
         # Add the canvas to the groupbox
-        cd_layout = QVBoxLayout(self.spectra_group)
-        cd_layout.addWidget(self.cd_canvas)
+        self.cd_widget = QWidget(self.spectra_group)
+        self.cd_layout = QVBoxLayout(self.cd_widget)
+        self.cd_layout.addWidget(self.cd_canvas)
         # Set up the canvas
         self.cd_fig.subplots_adjust(
-            left=0.12,
-            bottom=0.2,
+            left=0.05,
+            bottom=0.1,
             right=0.985,
-            top=0.88,
+            top=0.985,
             wspace=0.0,
             hspace=0.0)
-        self.cd_canvas.setGeometry(360, 60, 321, 201)
+        self.cd_widget.setGeometry(360, 60, 321, 201)
         self.cd_canvas.draw()
 
         # ld
         # Create the figure
-        self.ld_fig = Figure(figsize=(6, 5), dpi=50)
-        self.ld_fig.set_facecolor("#FFFAD5")
+        self.ld_fig = Figure(figsize=(7, 5.5), dpi=50)
         # Create the subplot
-        self.ld_ax = self.osc_fig.add_subplot(111)
-        self.ld_ax.set_facecolor("#FFFDF1")
-        self.ld_ax.set_ylabel('', fontsize=8)
+        self.ld_ax = self.ld_fig.add_subplot(111)
+        self.ld_fig.set_facecolor("#C3FFFF")
+        self.ld_ax.set_ylabel('', fontsize=10)
         # Create the canvas
         self.ld_canvas = FigureCanvas(self.ld_fig)
         # Add the canvas to the groupbox
-        ld_layout = QVBoxLayout(self.spectra_group)
-        ld_layout.addWidget(self.ld_canvas)
+        self.ld_widget = QWidget(self.spectra_group)
+        self.ld_layout= QVBoxLayout(self.ld_widget)
+        self.ld_layout.addWidget(self.ld_canvas)
         # Set up the canvas
         self.ld_fig.subplots_adjust(
-            left=0.12,
-            bottom=0.2,
+            left=0.05,
+            bottom=0.1,
             right=0.985,
-            top=0.88,
+            top=0.985,
             wspace=0.0,
             hspace=0.0)
-        self.ld_canvas.setGeometry(20, 290, 321, 201)
+        self.ld_widget.setGeometry(20, 290, 321, 201)
         self.ld_canvas.draw()
 
         # ellips
         # Create the figure
-        self.ellips_fig = Figure(figsize=(6, 5), dpi=50)
-        self.ellips_fig.set_facecolor("#FFFAD5")
+        self.ellips_fig = Figure(figsize=(7, 5.5), dpi=50)
         # Create the subplot
         self.ellips_ax = self.ellips_fig.add_subplot(111)
-        self.ellips_ax.set_facecolor("#FFFDF1")
-        self.ellips_ax.set_ylabel('', fontsize=8)
+        self.ellips_fig.set_facecolor("#C3FFFF")
+        self.ellips_ax.set_ylabel('', fontsize=10)
         # Create the canvas
         self.ellips_canvas = FigureCanvas(self.ellips_fig)
         # Add the canvas to the groupbox
-        ellips_layout = QVBoxLayout(self.spectra_group)
-        ellips_layout.addWidget(self.ellips_canvas)
+        self.ellips_widget = QWidget(self.spectra_group)
+        self.ellips_layout = QVBoxLayout(self.ellips_widget)
+        self.ellips_layout.addWidget(self.ellips_canvas)
         # Set up the canvas
         self.ellips_fig.subplots_adjust(
-            left=0.12,
-            bottom=0.2,
+            left=0.05,
+            bottom=0.1,
             right=0.985,
-            top=0.88,
+            top=0.985,
             wspace=0.0,
             hspace=0.0)
-        self.ellips_canvas.setGeometry(360, 290, 321, 201)
+        self.ellips_widget.setGeometry(360, 290, 321, 201)
         self.ellips_canvas.draw()
 
         self.label_29 = QLabel(self.spectra_group)
@@ -577,6 +642,12 @@ class Ui_MainWindow(QMainWindow):
         self.path_input.setValidator(validator2)
         self.edt_pmt.setValidator(validator1)
 
+        MainWindow.setCentralWidget(self.centralwidget)
+
+        self.retranslateUi(MainWindow)
+
+        QMetaObject.connectSlotsByName(MainWindow)
+
     # setupUii
 
     def retranslateUi(self, MainWindow):
@@ -592,7 +663,7 @@ class Ui_MainWindow(QMainWindow):
         self.txt_monoi.setText(QCoreApplication.translate("MainWindow", u"monoi_process", None))
         self.txt_monoii.setText(QCoreApplication.translate("MainWindow", u"monoii_process", None))
         self.txt_mfli.setText(QCoreApplication.translate("MainWindow", u"txt_mfli", None))
-        self.signaltuning_group.setTitle(QCoreApplication.translate("MainWindow", u"Signal tuning", None))
+        self.signaltuning_group.setTitle(QCoreApplication.translate("MainWindow", u"Signal Tuning", None))
         self.label_9.setText(QCoreApplication.translate("MainWindow", u"Peak Voltage :", None))
         self.label_10.setText(QCoreApplication.translate("MainWindow", u"Avg Voltage :", None))
         self.label_11.setText(QCoreApplication.translate("MainWindow", u"PMT Input :", None))
@@ -606,7 +677,7 @@ class Ui_MainWindow(QMainWindow):
         self.label_26.setText(QCoreApplication.translate("MainWindow", u"Phase Offset:", None))
         self.btn_set_gain.setText(QCoreApplication.translate("MainWindow", u"Set", None))
         self.btn_set_WL.setText(QCoreApplication.translate("MainWindow", u"Set", None))
-        self.btn_autorange.setText(QCoreApplication.translate("MainWindow", u"Set", None))
+        self.btn_autorange.setText(QCoreApplication.translate("MainWindow", u"AUTO", None))
         self.btn_set_phaseoffset.setText(QCoreApplication.translate("MainWindow", u"Set", None))
         self.btn_cal_phaseoffset.setText(QCoreApplication.translate("MainWindow", u"Calibrate Phase Offset", None))
         self.spectrasetup_group.setTitle(QCoreApplication.translate("MainWindow", u"Spectra Setup", None))
@@ -625,7 +696,6 @@ class Ui_MainWindow(QMainWindow):
         self.btn_abort.setText(QCoreApplication.translate("MainWindow", u"Stop", None))
         self.save_comments.setText(QCoreApplication.translate("MainWindow", u"Save", None))
         self.label_33.setText(QCoreApplication.translate("MainWindow", u"*required", None))
-        self.set_path.setText(QCoreApplication.translate("MainWindow", u"Set", None))
         self.label_34.setText(QCoreApplication.translate("MainWindow", u"Path length(mm):", None))
         self.spectra_group.setTitle(QCoreApplication.translate("MainWindow", u"Spectra", None))
         self.label_29.setText(QCoreApplication.translate("MainWindow", u"CD/c*l", None))

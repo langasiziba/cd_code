@@ -10,7 +10,7 @@ import numpy as np
 import pandas as pd
 import pyvisa
 from PyQt5 import QtWidgets
-from PyQt5.QtCore import QTimer, QCoreApplication, Qt
+from PyQt5.QtCore import QTimer, QCoreApplication, Qt, pyqtSignal
 from PyQt5.QtGui import QPalette, QColor
 from PyQt5.QtWidgets import QApplication, QMainWindow
 from PyQt5.QtWidgets import QVBoxLayout, QDialog, QLabel, QPushButton
@@ -72,8 +72,8 @@ class Controller(QMainWindow, LogObject):
     index_ac = 3  # in curr_spec
     index_dc = 1
     index_gabs = 9
-    index_lp_theta = 13
     index_ellips = 14
+
 
     # averaged spectrum during measurement
     avg_spec = np.array([[],  # wavelenght
@@ -87,6 +87,9 @@ class Controller(QMainWindow, LogObject):
     cal_collecting = False
     cal_new_value = 0.0
     cal_theta_thread = None
+
+    log_signal = pyqtSignal(str)
+
 
     # ---Start of initialization/closing section---
 
@@ -113,7 +116,6 @@ class Controller(QMainWindow, LogObject):
 
 
         self.log_queue = queue.Queue()
-        self.log_box = self.gui.debug_log
         self.assign_gui_events()
 
         if os.path.exists("last_params.txt"):
@@ -122,10 +124,11 @@ class Controller(QMainWindow, LogObject):
         self.set_initialized(False)
         self.set_acquisition_running(False)
 
-        self.log_author_message()
-        self.update_log()
 
         self.log_update_interval = 100
+        self.log_signal.connect(self.gui.append_to_log)
+        self.log_author_message()
+        self.update_log()
 
         # Create a QTimer for the log
         self.timer = QTimer()
@@ -140,17 +143,17 @@ class Controller(QMainWindow, LogObject):
         self.initialized = init
 
         if self.initialized:
-            self.gui.initialize_button.setEnabled(False)  # disable button
-            self.gui.initialize_button.setStyleSheet("background-color: grey")  # change color to grey
-            self.gui.close_button.setEnabled(True)  # enable button
-            self.gui.close_button.setStyleSheet("background-color: white")
+            self.gui.btn_init.setEnabled(False)  # disable button
+            self.gui.btn_init.setStyleSheet("background-color: grey")  # change color to grey
+            self.gui.btn_close.setEnabled(True)  # enable button
+            self.gui.btn_close.setStyleSheet("background-color: white")
             self.gui.signaltuning_group.setEnabled(True)
             self.gui.spectrasetup_group.setEnabled(True)
             self.gui.spectra_group.setEnabled(True)
         else:
-            self.gui.initialize_button.setEnabled(True)  # enable button
-            self.gui.initialize_button.setStyleSheet("background-color: white")  # reset color
-            self.gui.close_button.setEnabled(False)  # disable button
+            self.gui.btn_init.setEnabled(True)  # enable button
+            self.gui.btn_init.setStyleSheet("background-color: white")  # reset color
+            self.gui.btn_close.setEnabled(False)  # disable button
             self.gui.signaltuning_group.setEnabled(False)
             self.gui.spectrasetup_group.setEnabled(False)
             self.gui.spectra_group.setEnabled(False)
@@ -390,8 +393,8 @@ class Controller(QMainWindow, LogObject):
     def set_active_components(self):
         self.gui.btn_init.setEnabled(not self.initialized)
         self.gui.btn_close.setEnabled(self.initialized)
-        self.gui.spectra_setup.setEnabled(not self.acquisition_running and self.initialized and not self.cal_running)
-        self.gui.signal_tuning.setEnabled(not self.acquisition_running and self.initialized and not self.cal_collecting)
+        self.gui.spectrasetup_group.setEnabled(not self.acquisition_running and self.initialized and not self.cal_running)
+        self.gui.signaltuning_group.setEnabled(not self.acquisition_running and self.initialized and not self.cal_collecting)
         self.gui.btn_start.setEnabled(not self.acquisition_running and self.initialized and not self.cal_running)
         self.gui.btn_abort.setEnabled(self.acquisition_running and self.initialized and not self.cal_running)
         self.gui.btn_cal_phaseoffset.setEnabled(
@@ -406,8 +409,7 @@ class Controller(QMainWindow, LogObject):
         while not self.log_queue.empty():
             try:
                 msg = self.log_queue.get(False)
-                self.gui.log_box.append(msg)
-                self.gui.log_box.ensureCursorVisible()  # This will automatically scroll to the end of the log_box
+                self.gui.append_to_log(msg)  # Let append_to_log handle the log update
             except queue.Empty:
                 pass
 
@@ -572,19 +574,31 @@ class Controller(QMainWindow, LogObject):
 
     def update_spec(self):
         if self.acquisition_running:
-            self.gui.plot_spec(
-                tot=[self.curr_spec[0], self.curr_spec[self.index_dc]],
-                tot_avg=[self.avg_spec[0], self.avg_spec[1]],
-                cd=[self.curr_spec[0], self.curr_spec[self.index_ac]],
-                cd_avg=[self.avg_spec[0], self.avg_spec[2]],
-                gabs=[self.curr_spec[0], self.curr_spec[self.index_gabs]],
-                gabs_avg=[self.avg_spec[0], self.avg_spec[3]],
-                ellips=[self.curr_spec[0], self.curr_spec[self.index_ellips]],
-                ellips_avg=[self.avg_spec[0], self.avg_spec[4]])
+            self.gui.plot_spec(self.gui.gabs_fig, self.gui.gabs_canvas, self.gui.gabs_ax,
+                               gabs=[self.curr_spec[0], self.curr_spec[self.index_gabs]],
+                               gabs_avg=[self.avg_spec[0], self.avg_spec[3]],
+                               title='Gabs')
+
+            self.gui.plot_spec(self.gui.cd_fig, self.gui.cd_canvas, self.gui.cd_ax,
+                               cd=[self.curr_spec[0], self.curr_spec[self.index_ac]],
+                               cd_avg=[self.avg_spec[0], self.avg_spec[2]],
+                               title='CD')
+
+            self.gui.plot_spec(self.gui.ld_fig, self.gui.ld_canvas, self.gui.ld_ax,
+                               tot=[self.curr_spec[0], self.curr_spec[self.index_ld]],
+                               tot_avg=[self.avg_spec[0], self.avg_spec[1]],
+                               title='DC')
+
+            self.gui.plot_spec(self.gui.ellips_fig, self.gui.ellips_canvas, self.gui.ellips_ax,
+                               ellips=[self.curr_spec[0], self.curr_spec[self.index_ellips]],
+                               ellips_avg=[self.avg_spec[0], self.avg_spec[4]],
+                               title='Ellips')
+
 
         if not self.spec_thread is None:
             if self.spec_thread.is_alive():
                 QTimer.singleShot(self.spec_refresh_delay, self.update_spec)
+
                 # ----End of GUI section---
 
     # ---Start of spectra acquisition section---
@@ -835,10 +849,10 @@ class Controller(QMainWindow, LogObject):
                         curr_rep + 1)
                 self.avg_spec[2][index[0]] = (self.avg_spec[2][index[0]] * curr_rep + data[0][self.index_ac]) / (
                         curr_rep + 1)
-                # recalculate gabs
+                # recalculate gabs #TODO
                 self.avg_spec[3][index[0]] = 2 * self.avg_spec[2][index[0]] / self.avg_spec[1][index[0]]
 
-                # recalculate ellips
+                # recalculate ellips #TODO
                 self.avg_spec[4][index[0]] = 2 * self.avg_spec[2][index[0]] / self.avg_spec[2][index[0]]
 
                 # converts a numpy array to a pandas DataFrame
