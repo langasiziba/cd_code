@@ -4,6 +4,8 @@ import time
 import pyvisa
 from PyQt5.QtCore import QObject, pyqtSignal
 from PyQt5.QtWidgets import QMessageBox
+import traceback
+
 
 
 class ECommError(Exception):
@@ -33,6 +35,8 @@ class LogObject(QObject):
 
         if error or 'error' in ss.lower():
             self.log_queue.put(ss)
+            traceback_message = traceback.format_exc()
+            print(traceback_message)
             if not no_id:
                 self.show_error_box(ss)
                 self.log_signal.emit(ss)
@@ -63,6 +67,21 @@ class LogObject(QObject):
 
 
 class VisaDevice(LogObject):
+    def __init__(self, logObject=None, log_name=''):
+        # Instead of calling super().__init__(log_name=log_name),
+        # assign the queue of the logObject to this instance's queue
+        super().__init__(log_name=log_name)
+        self.log_queue = logObject.log_queue if logObject is not None else Queue()
+
+    def log(self, s: str, error: bool = False, no_id: bool = False):
+        super().log(s, error, no_id)
+
+    def log_ask(self, q: str):
+        self.log('<< {}'.format(q))
+
+    def log_answer(self, s: str):
+        self.log('>> {}'.format(s))
+
     def log_query(self, q: str) -> str:
         self.log_ask(q)
         s = self.inst.query(q)
@@ -70,15 +89,18 @@ class VisaDevice(LogObject):
         return s
 
     def debug_query(self, q: str) -> None:
-        self.inst.write(q)
-        self.log_ask(q)
-        start_time = time.time()
-        while time.time() - start_time < self.inst.timeout / 1000:
-            try:
-                self.log_answer(self.inst.read_bytes(1))
-            except pyvisa.VisaIOError:
-                self.log("Debug query timeout.")
-                break
+        if self.inst is not None:
+            self.inst.write(q)
+            self.log_ask(q)
+            start_time = time.time()
+            while time.time() - start_time < self.inst.timeout / 1000:
+                try:
+                    self.log_answer(self.inst.read_bytes(1))
+                except pyvisa.VisaIOError:
+                    self.log("Debug query timeout.")
+                    break
+        else:
+            self.log("No instrument instance.", error=True)
 
     def close(self) -> None:
         self.log('Closing connection...')

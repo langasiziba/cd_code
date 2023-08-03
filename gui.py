@@ -21,6 +21,12 @@ class Ui_MainWindow(QMainWindow):
         self.logObject = LogObject()
         self.logObject.log_signal.connect(self.append_to_log)
 
+    # @pyqtSlot(float)
+    # def update_mono_edt_lbl_slot(self, wl):
+    #     self.gui.txt_monoi.setText('{:.2f} nm'.format(wl))
+    #     self.gui.txt_monoii.setText('{:.2f} nm'.format(wl))
+    #     self.gui.edt_WL.setText('{:.2f}'.format(wl))
+
     @pyqtSlot(str)
     def append_to_log(self, text):
         self.debug_log.appendPlainText(text)  # Assuming debug_log_textedit is your QTextEdit widget
@@ -176,10 +182,10 @@ class Ui_MainWindow(QMainWindow):
         self.label_4.setObjectName(u"label_4")
         self.label_4.setGeometry(QRect(10, 190, 49, 16))
         self.label_4.setFont(font2)
-        self.pem_process = QLabel(self.devicesetup_group)
-        self.pem_process.setObjectName(u"pem_process")
-        self.pem_process.setGeometry(QRect(70, 100, 91, 16))
-        self.pem_process.setFont(font2)
+        self.txt_PEM = QLabel(self.devicesetup_group)
+        self.txt_PEM.setObjectName(u"txt_PEM")
+        self.txt_PEM.setGeometry(QRect(70, 100, 91, 16))
+        self.txt_PEM.setFont(font2)
         self.txt_monoi = QLabel(self.devicesetup_group)
         self.txt_monoi.setObjectName(u"txt_monoi")
         self.txt_monoi.setGeometry(QRect(70, 130, 101, 20))
@@ -289,10 +295,13 @@ class Ui_MainWindow(QMainWindow):
         self.cbx_range.setObjectName(u"cbx_range")
         self.cbx_range.setGeometry(QRect(110, 410, 113, 21))
         # add items to the combo box
-        self.cbx_range.addItem("0.001")
         self.cbx_range.addItem("0.003")
-        self.cbx_range.addItem("1.0")
-        self.cbx_range.addItem("3.0")
+        self.cbx_range.addItem("0.010")
+        self.cbx_range.addItem("0.030")
+        self.cbx_range.addItem("0.100")
+        self.cbx_range.addItem("0.200")
+        self.cbx_range.addItem("1.000")
+        self.cbx_range.addItem("3.000")
 
         self.edt_gain = QLineEdit(self.signaltuning_group)
         self.edt_gain.setObjectName(u"edt_gain")
@@ -443,7 +452,7 @@ class Ui_MainWindow(QMainWindow):
 
         self.var_pem_off = QCheckBox(self.spectrasetup_group)
         self.var_pem_off.setObjectName(u"var_pem_off")
-        self.var_pem_off.setGeometry(QRect(140, 460, 121, 16))
+        self.var_pem_off.setGeometry(QRect(140, 670, 121, 16))
 
         self.btn_start = QPushButton(self.spectrasetup_group)
         self.btn_start.setObjectName(u"btn_start")
@@ -636,7 +645,6 @@ class Ui_MainWindow(QMainWindow):
         self.edt_step.setValidator(validator0)
         self.edt_gain.setValidator(validator2)
         self.edt_phaseoffset.setValidator(validator2)
-        self.cbx_range.setValidator(validator2)
         self.edt_rep.setValidator(validator0)
         self.samplec_input.setValidator(validator2)
         self.path_input.setValidator(validator2)
@@ -659,7 +667,7 @@ class Ui_MainWindow(QMainWindow):
         self.label_2.setText(QCoreApplication.translate("MainWindow", u"MON1  :", None))
         self.label_3.setText(QCoreApplication.translate("MainWindow", u"MON2  :", None))
         self.label_4.setText(QCoreApplication.translate("MainWindow", u"MFLI     :", None))
-        self.pem_process.setText(QCoreApplication.translate("MainWindow", u"pem_process", None))
+        self.txt_PEM.setText(QCoreApplication.translate("MainWindow", u"txt_PEM", None))
         self.txt_monoi.setText(QCoreApplication.translate("MainWindow", u"monoi_process", None))
         self.txt_monoii.setText(QCoreApplication.translate("MainWindow", u"monoii_process", None))
         self.txt_mfli.setText(QCoreApplication.translate("MainWindow", u"txt_mfli", None))

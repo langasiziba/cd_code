@@ -4,7 +4,7 @@ programming interface, you would set up a demodulator to use this reference sign
 This allows the MFLI to measure the amplitude and phase of the signal from the photomultiplier tube (PMT) at the
 modulation frequency of the PEM."""
 from PyQt5.QtCore import pyqtSlot, pyqtSignal
-from debug import LogObject
+from debug import LogObject, VisaDevice
 import zhinst.core
 import zhinst.utils
 import time
@@ -18,7 +18,7 @@ from IPython.core.interactiveshell import InteractiveShell
 InteractiveShell.ast_node_interactivity = "all"
 
 
-class MFLI(LogObject):
+class MFLI(VisaDevice):
     sampling_rate = 104.6  # s-1 data transfer rate
     time_const = 0.00811410938  # s, time constant of the low-pass filter of the lock-in amplifier
     filter_order = 3
@@ -49,11 +49,12 @@ class MFLI(LogObject):
 
     sqrt2 = np.sqrt(2)
 
-    def __init__(self, ID: str, logname: str, log_queue: queue.Queue):
+    def __init__(self, ID: str, log_name: str, log_queue: queue.Queue, logObject=None):
+        super().__init__(logObject=logObject, log_name=log_name)
         self.scope = None
         self.devID = ID  # ID of the device, for example dev3902
         self.devPath = '/' + self.devID + '/'
-        self.log_name = logname
+        self.log_name = log_name
         self.log_queue = log_queue
 
     def connect(self) -> bool:
@@ -385,8 +386,6 @@ class MFLI(LogObject):
                 dc = average_value
 
                 # print out the average
-                print("The DC value or average value is ", average_value)
-
                 # Calculate CD=AC/DC
                 CD = np.divide(ac, dc)
                 # Calc I_L=(AC+DC)

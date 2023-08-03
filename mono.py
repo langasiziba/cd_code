@@ -6,11 +6,14 @@ import queue
 
 class Monoi(VisaDevice):
     # Edit these for different model
-    name = 'ASRL4::INSTR'
+    name = 'ASRL1::INSTR'
     model = 'SP-2-150i'
     serial = '21551955'
     ok = 'ok'
     log_name = 'MONI'
+
+    def __init__(self, logObject=None, log_name='MONI'):
+        super().__init__(logObject=logObject, log_name=log_name)
 
     def initialize(self, rm: pyvisa.ResourceManager, log_queue: queue.Queue) -> bool:
         """
@@ -56,7 +59,7 @@ class Monoi(VisaDevice):
         r6 = self.log_query('0 GOTO')
 
         return (r1 == r3) and (r2 == r4) and (self.model in r1) and (self.serial in r2) and (self.ok in r5) and (
-                    self.ok in r6)
+                self.ok in r6)
 
     def retry_query(self, q: str, n: int = 3) -> str:
         """
@@ -110,6 +113,7 @@ class Monoi(VisaDevice):
 
     #       wavelength += step
 
+
 class Monoii(VisaDevice):
     # Edit these for different model
     name = 'ASRL4::INSTR'
@@ -117,6 +121,9 @@ class Monoii(VisaDevice):
     serial = '21551956'
     ok = 'ok'
     log_name = 'MONII'
+
+    def __init__(self, logObject=None, log_name='MONII'):
+        super().__init__(logObject=logObject, log_name=log_name)
 
     def initialize(self, rm: pyvisa.ResourceManager, log_queue: queue.Queue) -> bool:
         """
@@ -162,7 +169,7 @@ class Monoii(VisaDevice):
         r6 = self.log_query('0 GOTO')
 
         return (r1 == r3) and (r2 == r4) and (self.model in r1) and (self.serial in r2) and (self.ok in r5) and (
-                    self.ok in r6)
+                self.ok in r6)
 
     def retry_query(self, q: str, n: int = 3) -> str:
         """

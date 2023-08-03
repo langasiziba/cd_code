@@ -12,8 +12,9 @@ import queue
 class PEM(VisaDevice):
     # A class to control a Hinds PEM controller 200 V01 device
 
-    def __init__(self, name='ASRL3::INSTR', model='Hinds PEM controller 200 V01', log_name='PEM', retardation=0.25):
-        super().__init__()
+    def __init__(self, logObject=None, name='ASRL3::INSTR', model='Hinds PEM controller 200 V01', log_name='PEM',
+                 retardation=0.25):
+        super().__init__(logObject=logObject, log_name=log_name)
         self.name = name
         self.model = model
         self.log_name = log_name

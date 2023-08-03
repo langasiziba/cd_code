@@ -24,6 +24,8 @@ from pem import PEM
 
 # Combines the individual components and controls the main window
 class Controller(QMainWindow, LogObject):
+    # update_mono_edt_lbl_signal = pyqtSignal(float)
+
     version = '1.0.1'
 
     lowpass_filter_risetime = 0.6  # s, depends on the timeconstant of the low pass filter
@@ -49,7 +51,7 @@ class Controller(QMainWindow, LogObject):
     max_gain = 885.6
     gain_norm = 4775.0
 
-    max_volt_hist_lenght = 75  # number of data points in the signal tuning graph
+    max_volt_hist_length = 75  # number of data points in the signal tuning graph
     edt_changed_color = '#FFFF80'
 
     curr_spec = np.array([[],  # wavelength
@@ -74,7 +76,6 @@ class Controller(QMainWindow, LogObject):
     index_gabs = 9
     index_ellips = 14
 
-
     # averaged spectrum during measurement
     avg_spec = np.array([[],  # wavelenght
                          [],  # DC
@@ -87,15 +88,14 @@ class Controller(QMainWindow, LogObject):
     cal_collecting = False
     cal_new_value = 0.0
     cal_theta_thread = None
-
+    initialized = False
     log_signal = pyqtSignal(str)
-
 
     # ---Start of initialization/closing section---
 
     def __init__(self):
-        # Locks to prevent race conditions in multithreading
-        super().__init__()
+        super().__init__(log_name='CTRL')
+
         # Create window
         self.gui = gui.Ui_MainWindow()
         self.gui.setupUi(self)
@@ -114,16 +114,13 @@ class Controller(QMainWindow, LogObject):
         self.stop_cal_trigger = [False]
         self.spec_thread = None
 
-
         self.log_queue = queue.Queue()
         self.assign_gui_events()
 
         if os.path.exists("last_params.txt"):
             self.load_last_settings()
 
-        self.set_initialized(False)
         self.set_acquisition_running(False)
-
 
         self.log_update_interval = 100
         self.log_signal.connect(self.gui.append_to_log)
@@ -138,21 +135,20 @@ class Controller(QMainWindow, LogObject):
 
         self.timer = QTimer()
         self.timer.timeout.connect(self.cal_end_after_thread)
+        # self.update_mono_edt_lbl_signal.connect(self.gui.update_mono_edt_lbl_slot)
+
 
     def set_initialized(self, init):
         self.initialized = init
 
         if self.initialized:
             self.gui.btn_init.setEnabled(False)  # disable button
-            self.gui.btn_init.setStyleSheet("background-color: grey")  # change color to grey
             self.gui.btn_close.setEnabled(True)  # enable button
-            self.gui.btn_close.setStyleSheet("background-color: white")
             self.gui.signaltuning_group.setEnabled(True)
             self.gui.spectrasetup_group.setEnabled(True)
             self.gui.spectra_group.setEnabled(True)
         else:
             self.gui.btn_init.setEnabled(True)  # enable button
-            self.gui.btn_init.setStyleSheet("background-color: white")  # reset color
             self.gui.btn_close.setEnabled(False)  # disable button
             self.gui.signaltuning_group.setEnabled(False)
             self.gui.spectrasetup_group.setEnabled(False)
@@ -211,7 +207,8 @@ class Controller(QMainWindow, LogObject):
 
     def set_acquisition_running(self, b):
         self.acquisition_running = b
-        self.set_active_components()
+        if self.initialized:
+            self.set_active_components()
 
     def init_devices(self):
         try:
@@ -221,7 +218,7 @@ class Controller(QMainWindow, LogObject):
             QtWidgets.QApplication.processEvents()
 
             self.pem_lock.acquire()
-            self.pem = PEM()
+            self.pem = PEM(logObject=self, log_name='PEM')
             QtWidgets.QApplication.processEvents()
             b1 = self.pem.initialize(rm_pem, self.log_queue)
             self.pem_lock.release()
@@ -233,7 +230,7 @@ class Controller(QMainWindow, LogObject):
                 rm_mono = pyvisa.ResourceManager()
                 QtWidgets.QApplication.processEvents()
                 self.monoi_lock.acquire()
-                self.monoi = Monoi()
+                self.monoi = Monoi(logObject=self, log_name='MONOI')
                 QtWidgets.QApplication.processEvents()
                 b2 = self.monoi.initialize(rm_mono, self.log_queue)
                 self.monoi_lock.release()
@@ -245,7 +242,7 @@ class Controller(QMainWindow, LogObject):
                     rm_mono = pyvisa.ResourceManager()
                     QtWidgets.QApplication.processEvents()
                     self.monoii_lock.acquire()
-                    self.monoii = Monoii()
+                    self.monoii = Monoii(logObject=self, log_name='MONOII')
                     QtWidgets.QApplication.processEvents()
                     b3 = self.monoii.initialize(rm_mono, self.log_queue)
                     self.monoii_lock.release()
@@ -256,11 +253,11 @@ class Controller(QMainWindow, LogObject):
                         self.log('Initialize lock-in amplifier MFLI for data acquisition...')
                         QtWidgets.QApplication.processEvents()
                         self.lockin_daq_lock.acquire()
-                        self.lockin_daq = MFLI('dev3902', 'LID', self.log_queue)
+                        self.lockin_daq = MFLI('dev7024', 'LID', self.log_queue, logObject=self)
                         QtWidgets.QApplication.processEvents()
                         b4 = self.lockin_daq.connect()
                         QtWidgets.QApplication.processEvents()
-                        b4 = b3 and self.lockin_daq.setup_for_daq(self.pem.bessel_corr, self.pem.bessel_corr_lp)
+                        b4 = b4 and self.lockin_daq.setup_for_daq(self.pem.bessel_corr, self.pem.bessel_corr_lp)
                         self.update_PMT_voltage_edt(self.lockin_daq.pmt_volt)
                         self.lockin_daq_lock.release()
                         self.set_phaseoffset_from_edt()
@@ -271,24 +268,25 @@ class Controller(QMainWindow, LogObject):
                             self.log('Initialize lock-in amplifier MFLI for oscilloscope monitoring...')
                             QtWidgets.QApplication.processEvents()
                             self.lockin_osc_lock.acquire()
-                            self.lockin_osc = MFLI('dev3902', 'LIA', self.log_queue)
+                            self.lockin_osc = MFLI('dev7024', 'LIA', self.log_queue, logObject=self)
                             QtWidgets.QApplication.processEvents()
                             b5 = self.lockin_osc.connect()
                             QtWidgets.QApplication.processEvents()
                             b5 = b5 and self.lockin_osc.setup_for_scope()
                             self.lockin_osc_lock.release()
-                            self.max_volt_history = collections.deque(maxlen=self.max_volt_hist_lenght)
+                            self.max_volt_history = collections.deque(maxlen=self.max_volt_hist_length)
                             self.osc_refresh_delay = 100  # ms
                             self.stop_osc_trigger = False
                             self.start_osc_monit()
 
                             if b5:
                                 self.set_initialized(True)
-                                self.move_nm(1000)
-
+                                self.movei_nm(1000)
+                                self.moveii_nm(1000)
                                 QtWidgets.QApplication.processEvents()
                                 self.log('')
                                 self.log('Initialization complete!')
+
         except Exception as e:
             self.set_initialized(False)
             self.log('ERROR during initialization: {}!'.format(str(e)), True)
@@ -340,19 +338,13 @@ class Controller(QMainWindow, LogObject):
 
     def log_author_message(self):
         self.log('CD-PLOT v{}'.format(self.version), False, True)
-        self.log('')
         self.log('Author: Langelihle (Langa) Siziba', False, True)
         self.log('https://github.com/wkitzmann/CatCPL/', False, True)  # TODO: copy and paste the github link
-        self.log('')
         self.log(
             'CD-PLOT is distributed under the GNU General Public License 3.0 ('
             'https://www.gnu.org/licenses/gpl-3.0.html).',
             False, True)
-        self.log('')
         self.log('Cite XX', False, True)
-        self.log('')
-        self.log('')
-        self.log('')
 
     def assign_gui_events(self):
         # Device Setup
@@ -393,8 +385,10 @@ class Controller(QMainWindow, LogObject):
     def set_active_components(self):
         self.gui.btn_init.setEnabled(not self.initialized)
         self.gui.btn_close.setEnabled(self.initialized)
-        self.gui.spectrasetup_group.setEnabled(not self.acquisition_running and self.initialized and not self.cal_running)
-        self.gui.signaltuning_group.setEnabled(not self.acquisition_running and self.initialized and not self.cal_collecting)
+        self.gui.spectrasetup_group.setEnabled(
+            not self.acquisition_running and self.initialized and not self.cal_running)
+        self.gui.signaltuning_group.setEnabled(
+            not self.acquisition_running and self.initialized and not self.cal_collecting)
         self.gui.btn_start.setEnabled(not self.acquisition_running and self.initialized and not self.cal_running)
         self.gui.btn_abort.setEnabled(self.acquisition_running and self.initialized and not self.cal_running)
         self.gui.btn_cal_phaseoffset.setEnabled(
@@ -439,7 +433,8 @@ class Controller(QMainWindow, LogObject):
     def set_WL_from_edt(self):
         try:
             nm = float(self.gui.edt_WL.text())
-            self.move_nm(nm)
+            self.movei_nm(nm)
+            self.movei_nm(nm)
         except ValueError as e:
             self.log(f'Error in set_WL_from_edt: {e}', True)
 
@@ -523,7 +518,7 @@ class Controller(QMainWindow, LogObject):
             time_left = time_left / 3600
 
         # Update progress bar value
-        self.gui.progressBar.setValue(f)
+        self.gui.progressBar.setValue(int(round(f)))
 
         # Update label text
         self.gui.progressBar.setToolTip(
@@ -536,18 +531,21 @@ class Controller(QMainWindow, LogObject):
             self.gui.txt_mfli.setText('-')
 
     def update_osc_captions(self, curr: float, label):
+        # setting a breakpoint here
+
         if not np.isnan(curr):
             label.setText('{:.1e} V'.format(curr))  # update QLabel text
 
     def update_osc_plots(self, max_vals):
+
         # start a QTimer to call the plot function at intervals
         self.timer = QTimer()
         self.timer.timeout.connect(lambda: self.gui.plot_osc(
             data_max=max_vals,
-            max_len=self.gui.max_volt_hist_length,
-            time_step=self.gui.osc_refresh_delay
+            max_len=self.max_volt_hist_length,
+            time_step=self.osc_refresh_delay
         ))
-        self.timer.start(self.gui.osc_refresh_delay)  # start timer
+        self.timer.start(self.osc_refresh_delay)  # start timer
 
     def update_PMT_voltage_edt(self, volt):
         self.gui.edt_pmt.setText('{:.3f}'.format(volt))
@@ -556,21 +554,14 @@ class Controller(QMainWindow, LogObject):
         self.gui.edt_gain.setStyleSheet('background-color: #FFFFFF;')
         self.window_update()  # Adjusted this method for PyQt
 
-    def update_mono_edt_lbl(self, wl):
-        self.gui.txt_monoi.setText('{:.2f} nm'.format(wl))
-        self.gui.txt_monoii.setText('{:.2f} nm'.format(wl))
-        self.gui.edt_WL.setText('{:.2f}'.format(wl))
-        self.gui.edt_WL.setStyleSheet('background-color: #FFFFFF;')
+    # def update_mono_edt_lbl(self, wl):
+    #     self.gui.txt_monoi.setText('{:.2f} nm'.format(wl))
+    #     self.gui.txt_monoii.setText('{:.2f} nm'.format(wl))
+    #     self.gui.edt_WL.setText('{:.2f}'.format(wl))
 
     def update_pem_lbl(self, wl):
         self.gui.txt_PEM.setText('{:.2f} nm'.format(wl))
 
-    def set_edt_text(self, edt, s):
-        state_before = edt.isEnabled()
-        edt.setEnabled(True)
-        edt.clear()
-        edt.insert(s)
-        edt.setEnabled(state_before)
 
     def update_spec(self):
         if self.acquisition_running:
@@ -585,7 +576,7 @@ class Controller(QMainWindow, LogObject):
                                title='CD')
 
             self.gui.plot_spec(self.gui.ld_fig, self.gui.ld_canvas, self.gui.ld_ax,
-                               tot=[self.curr_spec[0], self.curr_spec[self.index_ld]],
+                               tot=[self.curr_spec[0], self.curr_spec[self.index_dc]],
                                tot_avg=[self.avg_spec[0], self.avg_spec[1]],
                                title='DC')
 
@@ -593,7 +584,6 @@ class Controller(QMainWindow, LogObject):
                                ellips=[self.curr_spec[0], self.curr_spec[self.index_ellips]],
                                ellips_avg=[self.avg_spec[0], self.avg_spec[4]],
                                title='Ellips')
-
 
         if not self.spec_thread is None:
             if self.spec_thread.is_alive():
@@ -748,7 +738,9 @@ class Controller(QMainWindow, LogObject):
 
                 curr_nm = curr_nm + inc
                 # self.log('before move {:.3f}'.format(time.time()-t0))
-                self.move_nm(curr_nm, pem_off == 0)
+                self.movei_nm(curr_nm, pem_off == 0)
+                self.moveii_nm(curr_nm, pem_off == 0)
+
                 # self.log('after move {:.3f}'.format(time.time()-t0))
 
                 self.interruptable_sleep(self.lowpass_filter_risetime)
@@ -823,7 +815,9 @@ class Controller(QMainWindow, LogObject):
         self.log('')
         self.log('Returning to start wavelength')
         self.set_modulation_active(True)
-        self.move_nm(start_nm, move_pem=True)
+
+        self.movei_nm(start_nm, move_pem=False)
+        self.moveii_nm(start_nm, move_pem=True)
 
         self.stop_spec_trigger[0] = False
         # except Exception as e:
@@ -1059,15 +1053,16 @@ class Controller(QMainWindow, LogObject):
             self.lockin_daq.set_phaseoffset(value)
             self.lockin_daq_lock.release()
 
-    def move_nm(self, nm, move_pem=True):
+    def movei_nm(self, nm, move_pem=True):
+
         self.log('')
         self.log('Move to {} nm'.format(nm))
+
         if self.initialized:
             # The WL changes in PEM and Monochromators are done in separate threads to save time
             monoi_thread = th.Thread(target=self.monoi_move, args=(nm,))
-            monoii_thread = th.Thread(target=self.monoii_move, args=(nm,))
             monoi_thread.start()
-            monoii_thread.start()
+
 
             if move_pem:
                 self.pem_lock.acquire()
@@ -1075,10 +1070,10 @@ class Controller(QMainWindow, LogObject):
                 self.pem_lock.release()
                 self.update_pem_lbl(nm)
 
-            while monoi_thread.is_alive() and monoii_thread.is_alive():
-                time.sleep(0.02)
+            while monoi_thread.is_alive():
+                time.sleep(0.04)
 
-            self.update_mono_edt_lbl(nm)
+            # self.update_mono_edt_lbl_signal.emit(nm)
 
             if self.acquisition_running:
                 self.interruptable_sleep(self.move_delay)
@@ -1087,15 +1082,45 @@ class Controller(QMainWindow, LogObject):
         else:
             self.log('Instruments not initialized!', True)
 
-    def monoi_move(self, nm):
-        self.monoi_lock.acquire()
-        self.monoi.set_nm(nm)
-        self.monoi_lock.release()
+    def moveii_nm(self, nm, move_pem=True):
+
+        self.log('')
+        self.log('Move to {} nm'.format(nm))
+
+        if self.initialized:
+            # The WL changes in PEM and Monochromators are done in separate threads to save time
+            monoii_thread = th.Thread(target=self.monoii_move, args=(nm,))
+            monoii_thread.start()
+
+            if move_pem:
+                self.pem_lock.acquire()
+                self.pem.set_nm(nm)
+                self.pem_lock.release()
+                self.update_pem_lbl(nm)
+
+            while monoii_thread.is_alive():
+                time.sleep(0.04)
+
+            # self.update_mono_edt_lbl_signal.emit(nm)
+
+            if self.acquisition_running:
+                self.interruptable_sleep(self.move_delay)
+            else:
+                time.sleep(self.move_delay)
+        else:
+            self.log('Instruments not initialized!', True)
 
     def monoii_move(self, nm):
+
         self.monoii_lock.acquire()
         self.monoii.set_nm(nm)
         self.monoii_lock.release()
+
+    def monoi_move(self, nm):
+
+        self.monoi_lock.acquire()
+        self.monoi.set_nm(nm)
+        self.monoi_lock.release()
 
     def volt_to_gain(self, volt):
         return 10 ** (volt * self.pmt_slope + self.pmt_offset) / self.gain_norm
@@ -1119,9 +1144,10 @@ class Controller(QMainWindow, LogObject):
             self.log('Error in set_PMT_voltage: ' + str(e), True)
 
     def rescue_pmt(self):
+        self.set_PMT_voltage(0.0)
         self.log('Signal ({:.2f} V) higher than threshold ({:.2f} V)!! '
                  'Setting PMT to 0 V'.format(self.max_volt, self.shutdown_threshold), True)
-        self.set_PMT_voltage(0.0)
+
 
     def set_input_range(self, f):
         self.lockin_daq_lock.acquire()
@@ -1131,8 +1157,9 @@ class Controller(QMainWindow, LogObject):
     def set_auto_range(self):
         self.lockin_daq_lock.acquire()
         self.lockin_daq.set_input_range(f=0.0, auto=True)
-        self.gui.cbx_range.set('{:.3f}'.format(self.lockin_daq.signal_range))
+        self.gui.cbx_range.setCurrentText('{:.3f}'.format(self.lockin_daq.signal_range))
         self.lockin_daq_lock.release()
+
 
     def set_phaseoffset(self, f):
         self.lockin_daq_lock.acquire()
@@ -1145,6 +1172,8 @@ class Controller(QMainWindow, LogObject):
     # ---oscilloscope section start---
 
     def start_osc_monit(self):
+         # setting a breakpoint here
+
         self.stop_osc_trigger = False
         self.max_volt = 0.0
         self.avg_volt = 0.0
@@ -1158,6 +1187,7 @@ class Controller(QMainWindow, LogObject):
         self.refresh_osc()
 
     def refresh_osc(self):
+
         self.update_osc_captions(self.max_volt, self.gui.txt_maxVolt)
         self.update_osc_captions(self.avg_volt, self.gui.txt_avgVolt)
         self.update_osc_plots(max_vals=np.asarray(self.max_volt_history))
@@ -1167,6 +1197,7 @@ class Controller(QMainWindow, LogObject):
 
     # Collects current max. voltage in self.max_volt_history, will be executed in separate thread
     def monit_osc_loop(self):
+
         while not self.stop_osc_trigger:
             time.sleep(self.osc_refresh_delay / 1000)
 
@@ -1303,7 +1334,6 @@ class Controller(QMainWindow, LogObject):
 
         # Save new calibration in last parameters file
         self.save_params('last')
-
 
 
 class PhaseOffsetCalibrationDialog(QDialog):
