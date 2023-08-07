@@ -14,7 +14,6 @@ from debug import LogObject
 
 
 class Ui_MainWindow(QMainWindow):
-    closeSignal = pyqtSignal()
 
     def __init__(self):
         super().__init__()
@@ -30,15 +29,6 @@ class Ui_MainWindow(QMainWindow):
     @pyqtSlot(str)
     def append_to_log(self, text):
         self.debug_log.appendPlainText(text)  # Assuming debug_log_textedit is your QTextEdit widget
-
-    def closeEvent(self, event):
-        reply = QMessageBox.question(self, 'Quit', "Do you want to quit?",
-                                     QMessageBox.Yes, QMessageBox.No)
-        if reply == QMessageBox.Yes:
-            event.accept()
-            self.closeSignal.emit()  # emit the signal when the window is closing
-        else:
-            event.ignore()
 
     def plot(self, fig, canvas, ax, xlabel, ylabel, title, data, avgdata=[]):
         ax.clear()

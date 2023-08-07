@@ -106,7 +106,7 @@ class MFLI(VisaDevice):
 
             if ch1:
                 self.log('Channel 1...')
-                # Channel 1 (AC, CD)
+                # Channel 1 (AC, CD) #TODO: test at 0 Hz
                 self.daq.setInt(self.devPath + 'demods/0/adcselect', 0)
                 self.daq.setInt(self.devPath + 'extrefs/0/enable', 0)
                 self.daq.setDouble(self.devPath + 'demods/0/phaseshift', self.phaseoffset)

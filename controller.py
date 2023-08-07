@@ -83,6 +83,8 @@ class Controller(QMainWindow, LogObject):
     log_signal = pyqtSignal(str, bool)
     progress_signal = pyqtSignal(float, float, float, int, int, float)
     error_signal = pyqtSignal(str)
+    closeSignal = pyqtSignal()
+
 
     def __init__(self):
         super().__init__()
@@ -148,6 +150,8 @@ class Controller(QMainWindow, LogObject):
         self.ui.calibrateClicked.clicked.connect(self.cal_phaseoffset_start)
         self.ui.startbuttonClicked.clicked.connect(self.start_spec)
         self.ui.stopbuttonClicked.clicked.connect(self.abort_measurement)
+
+
 
     def set_initialized(self, init):
         self.initialized = init

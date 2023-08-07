@@ -12,7 +12,7 @@ import pyvisa
 from PyQt5 import QtWidgets
 from PyQt5.QtCore import QTimer, QCoreApplication, Qt, pyqtSignal
 from PyQt5.QtGui import QPalette, QColor
-from PyQt5.QtWidgets import QApplication, QMainWindow
+from PyQt5.QtWidgets import QApplication, QMainWindow, QMessageBox
 from PyQt5.QtWidgets import QVBoxLayout, QDialog, QLabel, QPushButton
 
 import gui
@@ -90,17 +90,14 @@ class Controller(QMainWindow, LogObject):
     cal_theta_thread = None
     initialized = False
     log_signal = pyqtSignal(str)
+    closeSignal = pyqtSignal()
 
     # ---Start of initialization/closing section---
 
     def __init__(self):
         super().__init__(log_name='CTRL')
 
-        # Create window
-        self.gui = gui.Ui_MainWindow()
-        self.gui.setupUi(self)
-        self.gui.closeSignal.connect(self.on_closing)
-        self.pem_lock = th.Lock()
+        self.pem_lock = th.Lock()  # TODO
         self.monoi_lock = th.Lock()
         self.monoii_lock = th.Lock()
         self.lockin_daq_lock = th.Lock()
@@ -114,14 +111,24 @@ class Controller(QMainWindow, LogObject):
         self.stop_cal_trigger = [False]
         self.spec_thread = None
 
+        # Create window
+        self.gui = gui.Ui_MainWindow()
+        self.gui.setupUi(self)
+
         self.log_queue = queue.Queue()
         self.assign_gui_events()
 
         if os.path.exists("last_params.txt"):
             self.load_last_settings()
 
+        self.set_initialized(False)
         self.set_acquisition_running(False)
 
+        # all closing connections
+        self.gui.btn_close.clicked.connect(self.close)
+        self.closeSignal.connect(self.on_closing)
+
+        # TODO
         self.log_update_interval = 100
         self.log_signal.connect(self.gui.append_to_log)
         self.log_author_message()
@@ -136,7 +143,6 @@ class Controller(QMainWindow, LogObject):
         self.timer = QTimer()
         self.timer.timeout.connect(self.cal_end_after_thread)
         # self.update_mono_edt_lbl_signal.connect(self.gui.update_mono_edt_lbl_slot)
-
 
     def set_initialized(self, init):
         self.initialized = init
@@ -313,6 +319,15 @@ class Controller(QMainWindow, LogObject):
         except Exception as e:
             self.log('Error while closing connections: {}.'.format(str(e)), True)
 
+    def closeEvent(self, event):
+        reply = QMessageBox.question(self, 'Quit', "Do you want to quit?",
+                                     QMessageBox.Yes, QMessageBox.No)
+        if reply == QMessageBox.Yes:
+            self.closeSignal.emit()  # emit the signal when the window is closing
+            event.accept()
+        else:
+            event.ignore()
+
     def on_closing(self):
         # Here, you'll do everything that needs to be done before the window is actually closed
 
@@ -354,19 +369,19 @@ class Controller(QMainWindow, LogObject):
         # Signal tuning
         # Signal tuning
         self.gui.btn_set_PMT.clicked.connect(self.click_set_pmt)
-        self.gui.edt_pmt.textChanged.connect(lambda: self.edt_changed(self.gui.edt_pmt))
+        self.gui.edt_pmt.textChanged.connect(lambda: self.edt_changed('pmt'))
         self.gui.edt_pmt.returnPressed.connect(self.enter_pmt)
 
         self.gui.btn_set_gain.clicked.connect(self.click_set_gain)
-        self.gui.edt_gain.textChanged.connect(lambda: self.edt_changed(self.gui.edt_gain))
+        self.gui.edt_gain.textChanged.connect(lambda: self.edt_changed('gain'))
         self.gui.edt_gain.returnPressed.connect(self.enter_gain)
 
         self.gui.btn_set_WL.clicked.connect(self.click_set_signal_WL)
-        self.gui.edt_WL.textChanged.connect(lambda: self.edt_changed(self.gui.edt_WL))
+        self.gui.edt_WL.textChanged.connect(lambda: self.edt_changed('WL'))
         self.gui.edt_WL.returnPressed.connect(self.enter_signal_WL)
 
         self.gui.btn_set_phaseoffset.clicked.connect(self.click_set_phaseoffset)
-        self.gui.edt_phaseoffset.textChanged.connect(lambda: self.edt_changed(self.gui.edt_phaseoffset))
+        self.gui.edt_phaseoffset.textChanged.connect(lambda: self.edt_changed('phaseoffset'))
         self.gui.edt_phaseoffset.returnPressed.connect(self.enter_phaseoffset)
 
         self.gui.cbx_range.currentIndexChanged.connect(self.change_cbx_range)
@@ -409,10 +424,18 @@ class Controller(QMainWindow, LogObject):
 
     # When the user changes a value in one of the text boxes in the Signal Tuning area
     # the text box is highlighed until the value is saved
-    def edt_changed(self, edt):
-        palette = QPalette()
-        palette.setColor(QPalette.Base, QColor(self.edt_changed_color))
-        edt.setPalette(palette)
+
+    # TODO: no color is actually changing here
+    def edt_changed(self, var):
+        if var == 'pmt':
+            edt = self.gui.edt_pmt
+        elif var == 'gain':
+            edt = self.gui.edt_gain
+        elif var == 'WL':
+            edt = self.gui.edt_WL
+        elif var == 'phaseoffset':
+            edt = self.gui.edt_phaseoffset
+        edt.setStyleSheet("background-color: {}".format(self.edt_changed_color))
 
     def set_PMT_volt_from_edt(self):
         try:
@@ -433,8 +456,7 @@ class Controller(QMainWindow, LogObject):
     def set_WL_from_edt(self):
         try:
             nm = float(self.gui.edt_WL.text())
-            self.movei_nm(nm)
-            self.movei_nm(nm)
+            self.move_nm(nm)
         except ValueError as e:
             self.log(f'Error in set_WL_from_edt: {e}', True)
 
@@ -554,14 +576,13 @@ class Controller(QMainWindow, LogObject):
         self.gui.edt_gain.setStyleSheet('background-color: #FFFFFF;')
         self.window_update()  # Adjusted this method for PyQt
 
-    # def update_mono_edt_lbl(self, wl):
-    #     self.gui.txt_monoi.setText('{:.2f} nm'.format(wl))
-    #     self.gui.txt_monoii.setText('{:.2f} nm'.format(wl))
-    #     self.gui.edt_WL.setText('{:.2f}'.format(wl))
+    def update_mono_edt_lbl(self, wl):
+        self.gui.txt_monoi.setText('{:.2f} nm'.format(wl))
+        self.gui.txt_monoii.setText('{:.2f} nm'.format(wl))
+        self.gui.edt_WL.setText('{:.2f}'.format(wl))
 
     def update_pem_lbl(self, wl):
         self.gui.txt_PEM.setText('{:.2f} nm'.format(wl))
-
 
     def update_spec(self):
         if self.acquisition_running:
@@ -1053,7 +1074,7 @@ class Controller(QMainWindow, LogObject):
             self.lockin_daq.set_phaseoffset(value)
             self.lockin_daq_lock.release()
 
-    def movei_nm(self, nm, move_pem=True):
+    def move_nm(self, nm, move_pem=True):
 
         self.log('')
         self.log('Move to {} nm'.format(nm))
@@ -1062,33 +1083,6 @@ class Controller(QMainWindow, LogObject):
             # The WL changes in PEM and Monochromators are done in separate threads to save time
             monoi_thread = th.Thread(target=self.monoi_move, args=(nm,))
             monoi_thread.start()
-
-
-            if move_pem:
-                self.pem_lock.acquire()
-                self.pem.set_nm(nm)
-                self.pem_lock.release()
-                self.update_pem_lbl(nm)
-
-            while monoi_thread.is_alive():
-                time.sleep(0.04)
-
-            # self.update_mono_edt_lbl_signal.emit(nm)
-
-            if self.acquisition_running:
-                self.interruptable_sleep(self.move_delay)
-            else:
-                time.sleep(self.move_delay)
-        else:
-            self.log('Instruments not initialized!', True)
-
-    def moveii_nm(self, nm, move_pem=True):
-
-        self.log('')
-        self.log('Move to {} nm'.format(nm))
-
-        if self.initialized:
-            # The WL changes in PEM and Monochromators are done in separate threads to save time
             monoii_thread = th.Thread(target=self.monoii_move, args=(nm,))
             monoii_thread.start()
 
@@ -1098,10 +1092,10 @@ class Controller(QMainWindow, LogObject):
                 self.pem_lock.release()
                 self.update_pem_lbl(nm)
 
-            while monoii_thread.is_alive():
-                time.sleep(0.04)
+            while monoi_thread.is_alive() or monoii_thread.is_alive():
+                time.sleep(0.02)
 
-            # self.update_mono_edt_lbl_signal.emit(nm)
+            self.update_mono_edt_lbl_signal.emit(nm)
 
             if self.acquisition_running:
                 self.interruptable_sleep(self.move_delay)
@@ -1111,13 +1105,11 @@ class Controller(QMainWindow, LogObject):
             self.log('Instruments not initialized!', True)
 
     def monoii_move(self, nm):
-
         self.monoii_lock.acquire()
         self.monoii.set_nm(nm)
         self.monoii_lock.release()
 
     def monoi_move(self, nm):
-
         self.monoi_lock.acquire()
         self.monoi.set_nm(nm)
         self.monoi_lock.release()
@@ -1148,7 +1140,6 @@ class Controller(QMainWindow, LogObject):
         self.log('Signal ({:.2f} V) higher than threshold ({:.2f} V)!! '
                  'Setting PMT to 0 V'.format(self.max_volt, self.shutdown_threshold), True)
 
-
     def set_input_range(self, f):
         self.lockin_daq_lock.acquire()
         self.lockin_daq.set_input_range(f=f, auto=False)
@@ -1159,7 +1150,6 @@ class Controller(QMainWindow, LogObject):
         self.lockin_daq.set_input_range(f=0.0, auto=True)
         self.gui.cbx_range.setCurrentText('{:.3f}'.format(self.lockin_daq.signal_range))
         self.lockin_daq_lock.release()
-
 
     def set_phaseoffset(self, f):
         self.lockin_daq_lock.acquire()
@@ -1172,7 +1162,7 @@ class Controller(QMainWindow, LogObject):
     # ---oscilloscope section start---
 
     def start_osc_monit(self):
-         # setting a breakpoint here
+        # setting a breakpoint here
 
         self.stop_osc_trigger = False
         self.max_volt = 0.0
