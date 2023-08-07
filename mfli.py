@@ -373,6 +373,7 @@ class MFLI(VisaDevice):
 
             if not all_nan:
                 raw_data = apply_nan_filter(raw_data, nan_filter)
+                scope_data = self.read_scope()
 
                 ac_raw = get_r(raw_data[0])
                 ac_theta = get_theta(raw_data[0])

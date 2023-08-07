@@ -11,7 +11,6 @@ import pandas as pd
 import pyvisa
 from PyQt5 import QtWidgets
 from PyQt5.QtCore import QTimer, QCoreApplication, Qt, pyqtSignal
-from PyQt5.QtGui import QPalette, QColor
 from PyQt5.QtWidgets import QApplication, QMainWindow, QMessageBox
 from PyQt5.QtWidgets import QVBoxLayout, QDialog, QLabel, QPushButton
 
@@ -91,6 +90,11 @@ class Controller(QMainWindow, LogObject):
     initialized = False
     log_signal = pyqtSignal(str)
     closeSignal = pyqtSignal()
+    mfli_signal = pyqtSignal(str)
+    mono_signal = pyqtSignal(str)
+    pem_signal = pyqtSignal(str)
+    clicked_init = False
+    clicked_solvent = False
 
     # ---Start of initialization/closing section---
 
@@ -114,6 +118,7 @@ class Controller(QMainWindow, LogObject):
         # Create window
         self.gui = gui.Ui_MainWindow()
         self.gui.setupUi(self)
+        self.gui.setController(self)
 
         self.log_queue = queue.Queue()
         self.assign_gui_events()
@@ -132,29 +137,55 @@ class Controller(QMainWindow, LogObject):
         self.log_update_interval = 100
         self.log_signal.connect(self.gui.append_to_log)
         self.log_author_message()
-        self.update_log()
 
         # Create a QTimer for the log
         self.timer = QTimer()
-        # noinspection PyUnresolvedReferences
-        self.timer.timeout.connect(self.update_log)
+
         self.timer.start(self.log_update_interval)
 
         self.timer = QTimer()
         self.timer.timeout.connect(self.cal_end_after_thread)
-        # self.update_mono_edt_lbl_signal.connect(self.gui.update_mono_edt_lbl_slot)
+
+    def set_mono(self):
+        self.mono_signal.connect(self.gui.update_mono)
+
+    def set_mfli(self):
+        self.mfli_signal.connect(self.gui.update_mfli)
+
+    def set_pem(self):
+        self.pem_signal.connect(self.gui.update_pem)
 
     def set_initialized(self, init):
         self.initialized = init
 
         if self.initialized:
             self.gui.btn_init.setEnabled(False)  # disable button
+            self.gui.btn_solvent.setEnabled(False)
             self.gui.btn_close.setEnabled(True)  # enable button
             self.gui.signaltuning_group.setEnabled(True)
             self.gui.spectrasetup_group.setEnabled(True)
             self.gui.spectra_group.setEnabled(True)
         else:
             self.gui.btn_init.setEnabled(True)  # enable button
+            self.gui.btn_solvent.setEnabled(True)
+            self.gui.btn_close.setEnabled(False)  # disable button
+            self.gui.signaltuning_group.setEnabled(False)
+            self.gui.spectrasetup_group.setEnabled(False)
+            self.gui.spectra_group.setEnabled(False)
+
+    def set_solvent_initialized(self, init):
+        self.initialized = init
+
+        if self.initialized:
+            self.gui.btn_init.setEnabled(False)  # disable button
+            self.gui.btn_solvent.setEnabled(False)
+            self.gui.btn_close.setEnabled(True)  # enable button
+            self.gui.signaltuning_group.setEnabled(True)
+            self.gui.spectrasetup_group.setEnabled(True)
+            self.gui.spectra_group.setEnabled(True)
+        else:
+            self.gui.btn_init.setEnabled(True)  # enable button
+            self.gui.btn_solvent.setEnabled(True)
             self.gui.btn_close.setEnabled(False)  # disable button
             self.gui.signaltuning_group.setEnabled(False)
             self.gui.spectrasetup_group.setEnabled(False)
@@ -190,11 +221,12 @@ class Controller(QMainWindow, LogObject):
                 self.gui.edt_step,
                 self.gui.edt_dwell,
                 self.gui.edt_rep,
-                self.gui.edt_excWL,
+                self.gui.edt_WL,
                 self.gui.edt_comment,
                 self.gui.edt_ac_blank,
                 self.gui.edt_phaseoffset,
                 self.gui.edt_dc_blank,
+                self.gui.edt_base,
                 self.gui.edt_det_corr
                 ]
 
@@ -230,6 +262,7 @@ class Controller(QMainWindow, LogObject):
             self.pem_lock.release()
             QtWidgets.QApplication.processEvents()
             self.log('')
+            self.pem_signal.emit("Ready")
 
             if b1:
                 self.log('Initialize monochromator SP-2155...')
@@ -254,6 +287,7 @@ class Controller(QMainWindow, LogObject):
                     self.monoii_lock.release()
                     QtWidgets.QApplication.processEvents()
                     self.log('')
+                    self.mono_signal.emit("Ready")
 
                     if b3:
                         self.log('Initialize lock-in amplifier MFLI for data acquisition...')
@@ -284,11 +318,16 @@ class Controller(QMainWindow, LogObject):
                             self.osc_refresh_delay = 100  # ms
                             self.stop_osc_trigger = False
                             self.start_osc_monit()
+                            self.mfli_signal.emit("Ready")
 
                             if b5:
-                                self.set_initialized(True)
-                                self.movei_nm(1000)
-                                self.moveii_nm(1000)
+                                if self.clicked_init:
+                                    self.set_initialized(True)
+                                    self.log('Initialized for sample')
+                                elif self.clicked_solvent:
+                                    self.set_solvent_initialized(True)
+                                    self.log('Initialized for base reading, input solvent')
+                                self.move_nm(1000)
                                 QtWidgets.QApplication.processEvents()
                                 self.log('')
                                 self.log('Initialization complete!')
@@ -366,7 +405,9 @@ class Controller(QMainWindow, LogObject):
         self.gui.btn_init.clicked.connect(self.click_init)
         self.gui.btn_close.clicked.connect(self.disconnect_devices)
 
-        # Signal tuning
+        # base reading
+        self.gui.btn_solvent.clicked.connect(self.click_solvent)
+
         # Signal tuning
         self.gui.btn_set_PMT.clicked.connect(self.click_set_pmt)
         self.gui.edt_pmt.textChanged.connect(lambda: self.edt_changed('pmt'))
@@ -405,22 +446,12 @@ class Controller(QMainWindow, LogObject):
         self.gui.signaltuning_group.setEnabled(
             not self.acquisition_running and self.initialized and not self.cal_collecting)
         self.gui.btn_start.setEnabled(not self.acquisition_running and self.initialized and not self.cal_running)
-        self.gui.btn_abort.setEnabled(self.acquisition_running and self.initialized and not self.cal_running)
+        self.gui.btn_abort.setEnabled(self.acquisition_running and not self.cal_running)
         self.gui.btn_cal_phaseoffset.setEnabled(
             not self.acquisition_running and self.initialized and not self.cal_running)
-        self.update_mfli_status(self.initialized)
 
     def window_update(self):
         QApplication.processEvents()
-
-    def update_log(self):
-        # Handle all log messages currently in the queue, if any
-        while not self.log_queue.empty():
-            try:
-                msg = self.log_queue.get(False)
-                self.gui.append_to_log(msg)  # Let append_to_log handle the log update
-            except queue.Empty:
-                pass
 
     # When the user changes a value in one of the text boxes in the Signal Tuning area
     # the text box is highlighed until the value is saved
@@ -472,7 +503,15 @@ class Controller(QMainWindow, LogObject):
     def click_init(self):
         # deactivate init button
         self.gui.btn_init.setEnabled(False)
+        self.gui.btn_solvent.setEnabled(False)
         self.init_devices()
+        self.clicked_init = True
+
+    def click_solvent(self):
+        self.gui.self.gui.btn_init.setEnabled(False)
+        self.gui.btn_solvent.setEnabled(False)
+        self.init_devices()
+        self.clicked_solvent = True
 
     def click_set_pmt(self):
         self.set_PMT_volt_from_edt()
@@ -546,12 +585,6 @@ class Controller(QMainWindow, LogObject):
         self.gui.progressBar.setToolTip(
             '{:.1f} % ({:d}/{:d}), ca. {:.1f} {}'.format(f, run, run_count, time_left, unit))
 
-    def update_mfli_status(self, b: bool):
-        if b:
-            self.gui.txt_mfli.setText('connected')
-        else:
-            self.gui.txt_mfli.setText('-')
-
     def update_osc_captions(self, curr: float, label):
         # setting a breakpoint here
 
@@ -575,14 +608,6 @@ class Controller(QMainWindow, LogObject):
         self.gui.edt_pmt.setStyleSheet('background-color: #FFFFFF;')
         self.gui.edt_gain.setStyleSheet('background-color: #FFFFFF;')
         self.window_update()  # Adjusted this method for PyQt
-
-    def update_mono_edt_lbl(self, wl):
-        self.gui.txt_monoi.setText('{:.2f} nm'.format(wl))
-        self.gui.txt_monoii.setText('{:.2f} nm'.format(wl))
-        self.gui.edt_WL.setText('{:.2f}'.format(wl))
-
-    def update_pem_lbl(self, wl):
-        self.gui.txt_PEM.setText('{:.2f} nm'.format(wl))
 
     def update_spec(self):
         if self.acquisition_running:
@@ -632,12 +657,14 @@ class Controller(QMainWindow, LogObject):
 
         ac_blank = self.gui.edt_ac_blank.text()
         dc_blank = self.gui.edt_dc_blank.text()
+        base_blank = self.gui.edt_dc_blank.text()
         det_corr = self.gui.edt_det_corr.text()
         filename = self.gui.edt_filename.text()
         reps = int(self.gui.edt_rep.text())
 
         ac_blank_exists = filename_exists_or_empty(ac_blank)
         dc_blank_exists = filename_exists_or_empty(dc_blank)
+        base_blank_exists = filename_exists_or_empty(dc_blank)
         det_corr_exists = filename_exists_or_empty(det_corr)
 
         if not check_illegal_chars(filename):
@@ -648,7 +675,7 @@ class Controller(QMainWindow, LogObject):
                     s = '_1'
                 filename_exists = filename_exists_or_empty(filename + s)
 
-                error = not ac_blank_exists or not dc_blank_exists or not det_corr_exists or filename_exists
+                error = not ac_blank_exists or not dc_blank_exists or not det_corr_exists or filename_exists or not base_blank_exists
 
                 if not error:
                     self.stop_spec_trigger[0] = False
@@ -664,6 +691,7 @@ class Controller(QMainWindow, LogObject):
                         filename,
                         ac_blank,
                         dc_blank,
+                        base_blank_exists,
                         det_corr,
                         self.gui.var_pem_off.isChecked()))
                     self.spec_thread.start()
@@ -673,6 +701,8 @@ class Controller(QMainWindow, LogObject):
                         self.log('Error: AC-blank file does not exist!', True)
                     if not dc_blank_exists:
                         self.log('Error: DC-blank file does not exist!', True)
+                    if not base_blank_exists:
+                        self.log('Error: base reading blank file does not exist!', True)
                     if not det_corr_exists:
                         self.log('Error: Detector correction file does not exist!', True)
                     if filename_exists:
@@ -684,7 +714,7 @@ class Controller(QMainWindow, LogObject):
 
     # will be executed in separate thread
     def record_spec(self, start_nm: float, end_nm: float, step: float, dwell_time: float, reps: int, filename: str,
-                    ac_blank: str, dc_blank: str, det_corr: str, pem_off: int):
+                    ac_blank: str, dc_blank: str, base_blank: str, det_corr: str, pem_off: int):
 
         global data
 
@@ -713,7 +743,7 @@ class Controller(QMainWindow, LogObject):
                                   [],  # gabs
                                   []])  # ellips
 
-        correction = ac_blank != '' or dc_blank != '' or det_corr != ''
+        correction = ac_blank != '' or dc_blank != '' or det_corr != '' or base_blank != ''
 
         if start_nm > end_nm:
             inc = -step
@@ -730,42 +760,49 @@ class Controller(QMainWindow, LogObject):
         t0 = time.time()
 
         i = 0
+
         while (i < reps) and not self.stop_spec_trigger[0]:
             self.log('')
             self.log('Run {}/{}'.format(i + 1, reps))
 
-            self.curr_spec = np.array(([[],  # wavelength
-                                        [],  # DC
-                                        [],  # DC stddev
-                                        [],  # CD
-                                        [],  # CD stddev
-                                        [],  # I_L
-                                        [],  # I_L stddev
-                                        [],  # I_R
-                                        [],  # I_R stddev
-                                        [],  # g_abs
-                                        [],  # g_abs stddev
-                                        [],  # ld
-                                        [],  # ld stddev
-                                        [],  # molar_ellip
-                                        [],  # molar_ellip stddev
-                                        [],  # ellip
-                                        []]))  # ellip stddev
+            if self.clicked_init:
+                self.curr_spec = np.array(([[],  # wavelength
+                                            [],  # DC
+                                            [],  # DC stddev
+                                            [],  # CD
+                                            [],  # CD stddev
+                                            [],  # I_L
+                                            [],  # I_L stddev
+                                            [],  # I_R
+                                            [],  # I_R stddev
+                                            [],  # g_abs
+                                            [],  # g_abs stddev
+                                            [],  # ld
+                                            [],  # ld stddev
+                                            [],  # molar_ellip
+                                            [],  # molar_ellip stddev
+                                            [],  # ellip
+                                            []]))  # ellip stddev
 
-            # self.log('start {}'.format(time.time()-t0))
+            elif self.clicked_solvent:
+                self.curr_spec = np.array(([[],  # wavelength
+                                            [],  # DC
+                                            [],  # DC stddev
+                                            [],  # CD
+                                            [],  # CD stddev
+                                            [],  # I_L
+                                            [],  # I_L stddev
+                                            [],  # I_R
+                                            []]))  # I_R stddev
+
             curr_nm = start_nm - inc
             while ((((direction > 0) and (curr_nm < end_nm)) or ((direction < 0) and (curr_nm > end_nm)))
                    and not self.stop_spec_trigger[0]):
 
                 curr_nm = curr_nm + inc
-                # self.log('before move {:.3f}'.format(time.time()-t0))
-                self.movei_nm(curr_nm, pem_off == 0)
-                self.moveii_nm(curr_nm, pem_off == 0)
-
-                # self.log('after move {:.3f}'.format(time.time()-t0))
+                self.move_nm(curr_nm, pem_off == 0)
 
                 self.interruptable_sleep(self.lowpass_filter_risetime)
-                # self.log('afer risetime {:.3f}'.format(time.time()-t0))
 
                 # try three times to get a successful measurement
                 j = 0
@@ -814,7 +851,7 @@ class Controller(QMainWindow, LogObject):
             self.save_spec(dfcurr_spec, filename + index_str)
 
             if correction:
-                dfcurr_spec_corr = self.apply_corr(dfcurr_spec, ac_blank, dc_blank, det_corr)
+                dfcurr_spec_corr = self.apply_corr(dfcurr_spec, ac_blank, dc_blank, base_blank, det_corr)
                 self.save_spec(dfcurr_spec_corr, filename + index_str + '_corr', False)
 
             dfall_spectra[i] = dfcurr_spec
@@ -830,15 +867,14 @@ class Controller(QMainWindow, LogObject):
             self.save_spec(dfavg_spec, filename + '_avg', False)
 
             if correction:
-                dfavg_spec_corr = self.apply_corr(dfavg_spec, ac_blank, dc_blank, det_corr)
+                dfavg_spec_corr = self.apply_corr(dfavg_spec, ac_blank, dc_blank, base_blank, det_corr)
                 self.save_spec(dfavg_spec_corr, filename + '_avg_corr', False)
 
         self.log('')
         self.log('Returning to start wavelength')
         self.set_modulation_active(True)
 
-        self.movei_nm(start_nm, move_pem=False)
-        self.moveii_nm(start_nm, move_pem=True)
+        self.move_nm(start_nm, move_pem=True)
 
         self.stop_spec_trigger[0] = False
         # except Exception as e:
@@ -909,7 +945,7 @@ class Controller(QMainWindow, LogObject):
 
         return dfavg
 
-    def apply_corr(self, dfspec: pd.DataFrame, ac_blank: str, dc_blank: str, det_corr: str):
+    def apply_corr(self, dfspec: pd.DataFrame, ac_blank: str, dc_blank: str, base_blank:str, det_corr: str):
 
         # Gives True if wavelength region is suitable
         def is_suitable(df_corr: pd.DataFrame, check_index: bool) -> bool:
@@ -984,6 +1020,19 @@ class Controller(QMainWindow, LogObject):
             else:
                 self.log('DC blank correction file does not contain the measured wavelengths!', True)
 
+        if base_blank != '':
+            self.log('AC blank correction with {}'.format(".\\data\\" + base_blank + ".csv"))
+            df_base_blank = pd.read_csv(filepath_or_buffer=".\\data\\" + base_blank + ".csv", sep=',',
+                                      index_col='WL')
+
+            if is_suitable(df_base_blank, True):
+                dfspec['AC'] = dfspec['AC'] - df_base_blank['AC']
+                dfspec['AC_std'] = ((dfspec['AC_std'] / 2) ** 2 + (df_base_blank['AC_std'] / 2) ** 2) ** 0.5
+                dfspec['DC'] = dfspec['DC'] - df_base_blank['DC']
+                dfspec['DC_std'] = ((dfspec['DC_std'] / 2) ** 2 + (df_base_blank['DC_std'] / 2) ** 2) ** 0.5
+            else:
+                self.log('Base reading blank correction file does not contain the measured wavelengths!', True)
+
                 # If there are wavelength values in the blankfiles that are not in dfspec this will give NaN values
         # Drop all rows that contain NaN values
         # The user must make sure that the blank files contain the correct values for the measurement
@@ -1026,6 +1075,7 @@ class Controller(QMainWindow, LogObject):
             f.write('Comment = {}\n'.format(self.gui.edt_comment.text()))
             f.write('AC-Blank-File = {}\n'.format(self.gui.edt_ac_blank.text()))
             f.write('DC-Blank-File = {}\n'.format(self.gui.edt_dc_blank.text()))
+            f.write('Base-Blank-File = {}\n'.format(self.gui.edt_base.text()))
             f.write('PEM off = {:d}\n'.format(self.gui.var_pem_off.isChecked()))
             f.write('Detector Correction File = {}\n'.format(self.gui.edt_det_corr.text()))
             f.write('PMT voltage = {} V\n'.format(self.gui.edt_pmt.text()))
@@ -1090,12 +1140,12 @@ class Controller(QMainWindow, LogObject):
                 self.pem_lock.acquire()
                 self.pem.set_nm(nm)
                 self.pem_lock.release()
-                self.update_pem_lbl(nm)
+                self.pem_signal.emit(str(nm))
 
             while monoi_thread.is_alive() or monoii_thread.is_alive():
                 time.sleep(0.02)
 
-            self.update_mono_edt_lbl_signal.emit(nm)
+            self.mono_signal.emit(str(nm))
 
             if self.acquisition_running:
                 self.interruptable_sleep(self.move_delay)

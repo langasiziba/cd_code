@@ -3,6 +3,9 @@ from PyQt5.QtWidgets import QApplication
 from PyQt5.QtCore import Qt
 from controller_new import Controller
 import traceback
+import faulthandler
+
+faulthandler.enable()
 
 
 def main():
