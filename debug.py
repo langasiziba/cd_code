@@ -37,7 +37,6 @@ class LogObject(QObject):
             traceback_message = traceback.format_exc()
             print(traceback_message)
             self.show_error_box(ss)
-            self.log_signal.emit(ss)
         elif not self.log_queue.full():
             self.log_queue.put(ss)
             self.error_emitted = False

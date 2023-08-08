@@ -13,6 +13,7 @@ from PyQt5 import QtWidgets
 from PyQt5.QtCore import QTimer, QCoreApplication, Qt, pyqtSignal
 from PyQt5.QtWidgets import QApplication, QMainWindow, QMessageBox
 from PyQt5.QtWidgets import QVBoxLayout, QDialog, QLabel, QPushButton
+from matplotlib import pyplot as plt
 
 import gui
 from debug import LogObject
@@ -56,27 +57,34 @@ class Controller(QMainWindow, LogObject):
     curr_spec = np.array([[],  # wavelength
                           [],  # DC
                           [],  # DC stddev
-                          [],  # cd
-                          [],  # cd stddev
+                          [],  # AC
+                          [],  # AC stddev
+                          [],  # CD
+                          [],  # CD stddev
                           [],  # I_L
                           [],  # I_L stddev
                           [],  # I_R
                           [],  # I_R stddev
-                          [],  # g_abs
-                          [],  # g_abs stddev
-                          [],  # molar_ellip
-                          [],  # molar_ellip stddev
+                          [],  # gabs
+                          [],  # gabs stddev
+                          [],  # m_ellip
+                          [],  # m_ellip stddev
                           [],  # ellip
                           []])  # ellip stddev
-    index_cd = 3  # in curr_spec
+
     index_dc = 1
-    index_gabs = 9
-    index_ellip = 13
-    index_molarellip = 11
+    index_ac = 3
+    index_cd = 5
+    index_IL = 7
+    index_IR = 9
+    index_gabs = 11
+    index_m_ellip = 13
+    index_ellip = 15
 
     # averaged spectrum during measurement
     avg_spec = np.array([[],  # wavelenghth
                          [],  # DC
+                         [],  # AC
                          [],  # CD
                          [],  # gabs
                          []])  # ellips
@@ -207,15 +215,14 @@ class Controller(QMainWindow, LogObject):
                     r'Step = ([0-9\.]*) nm\n',
                     r'Dwell time = ([0-9\.]*) s\n',
                     r'Repetitions = ([0-9]*)\n',
-                    r'Exc. WL = ([0-9\.]*) nm\n',
                     r'Comment = (.*)\n',
                     r'AC-Blank-File = (.*)\n',
                     r'Phase offset = ([0-9\.]*) deg',
-                    r'Base-Blank-File = (.*)\n',
                     r'DC-Blank-File = (.*)\n',
+                    r'Base-Blank-File = (.*)\n',
+                    r'Detector Correction File = (.*)\n',
                     r'Sample C = ([0-9\.]*) mol/l',
-                    r'Path l = ([0-9\.]*) cm',
-                    r'Detector Correction File = (.*)\n']
+                    r'Path l = ([0-9\.]*) cm']
 
         edts = [self.gui.edt_filename,
                 self.gui.edt_start,
@@ -261,6 +268,7 @@ class Controller(QMainWindow, LogObject):
 
             self.pem_lock.acquire()
             self.pem = PEM(logObject=self, log_name='PEM')
+            self.pem.log_signal.connect(self.gui.append_to_log)
             QtWidgets.QApplication.processEvents()
             b1 = self.pem.initialize(rm_pem, self.log_queue)
             self.pem_lock.release()
@@ -273,7 +281,8 @@ class Controller(QMainWindow, LogObject):
                 rm_mono = pyvisa.ResourceManager()
                 QtWidgets.QApplication.processEvents()
                 self.monoi_lock.acquire()
-                self.monoi = Monoi(logObject=self, log_name='MONOI')
+                self.monoi = Monoi(logObject=self, log_name='MONO1')
+                self.monoi.log_signal.connect(self.gui.append_to_log)
                 QtWidgets.QApplication.processEvents()
                 b2 = self.monoi.initialize(rm_mono, self.log_queue)
                 self.monoi_lock.release()
@@ -285,7 +294,8 @@ class Controller(QMainWindow, LogObject):
                     rm_mono = pyvisa.ResourceManager()
                     QtWidgets.QApplication.processEvents()
                     self.monoii_lock.acquire()
-                    self.monoii = Monoii(logObject=self, log_name='MONOII')
+                    self.monoii = Monoii(logObject=self, log_name='MONO2')
+                    self.monoii.log_signal.connect(self.gui.append_to_log)
                     QtWidgets.QApplication.processEvents()
                     b3 = self.monoii.initialize(rm_mono, self.log_queue)
                     self.monoii_lock.release()
@@ -298,6 +308,7 @@ class Controller(QMainWindow, LogObject):
                         QtWidgets.QApplication.processEvents()
                         self.lockin_daq_lock.acquire()
                         self.lockin_daq = MFLI('dev7024', 'LID', self.log_queue, logObject=self)
+                        self.lockin_daq.log_signal.connect(self.gui.append_to_log)
                         QtWidgets.QApplication.processEvents()
                         b4 = self.lockin_daq.connect()
                         QtWidgets.QApplication.processEvents()
@@ -313,6 +324,7 @@ class Controller(QMainWindow, LogObject):
                             QtWidgets.QApplication.processEvents()
                             self.lockin_osc_lock.acquire()
                             self.lockin_osc = MFLI('dev7024', 'LIA', self.log_queue, logObject=self)
+                            self.lockin_osc.log_signal.connect(self.gui.append_to_log)
                             QtWidgets.QApplication.processEvents()
                             b5 = self.lockin_osc.connect()
                             QtWidgets.QApplication.processEvents()
@@ -451,7 +463,7 @@ class Controller(QMainWindow, LogObject):
         self.gui.signaltuning_group.setEnabled(
             not self.acquisition_running and self.initialized and not self.cal_collecting)
         self.gui.btn_start.setEnabled(not self.acquisition_running and self.initialized and not self.cal_running)
-        self.gui.btn_abort.setEnabled(self.acquisition_running and not self.cal_running)
+        self.gui.btn_abort.setEnabled(self.initialized and self.acquisition_running and not self.cal_running)
         self.gui.btn_cal_phaseoffset.setEnabled(
             not self.acquisition_running and self.initialized and not self.cal_running)
 
@@ -513,7 +525,7 @@ class Controller(QMainWindow, LogObject):
         self.clicked_init = True
 
     def click_solvent(self):
-        self.gui.self.gui.btn_init.setEnabled(False)
+        self.gui.btn_init.setEnabled(False)
         self.gui.btn_solvent.setEnabled(False)
         self.init_devices()
         self.clicked_solvent = True
@@ -614,16 +626,17 @@ class Controller(QMainWindow, LogObject):
         self.gui.edt_gain.setStyleSheet('background-color: #FFFFFF;')
         self.window_update()  # Adjusted this method for PyQt
 
+    # TODO: ensure this is correct
     def update_spec(self):
         if self.acquisition_running:
             self.gui.plot_spec(self.gui.gabs_fig, self.gui.gabs_canvas, self.gui.gabs_ax,
                                gabs=[self.curr_spec[0], self.curr_spec[self.index_gabs]],
-                               gabs_avg=[self.avg_spec[0], self.avg_spec[3]],
+                               gabs_avg=[self.avg_spec[0], self.avg_spec[4]],
                                title='Gabs')
 
             self.gui.plot_spec(self.gui.cd_fig, self.gui.cd_canvas, self.gui.cd_ax,
                                cd=[self.curr_spec[0], self.curr_spec[self.index_ac]],
-                               cd_avg=[self.avg_spec[0], self.avg_spec[2]],
+                               cd_avg=[self.avg_spec[0], self.avg_spec[3]],
                                title='CD')
 
             self.gui.plot_spec(self.gui.ld_fig, self.gui.ld_canvas, self.gui.ld_ax,
@@ -633,8 +646,8 @@ class Controller(QMainWindow, LogObject):
 
             self.gui.plot_spec(self.gui.ellips_fig, self.gui.ellips_canvas, self.gui.ellips_ax,
                                ellips=[self.curr_spec[0], self.curr_spec[self.index_ellips]],
-                               ellips_avg=[self.avg_spec[0], self.avg_spec[4]],
-                               title='Ellips')
+                               ellips_avg=[self.avg_spec[0], self.avg_spec[5]],
+                               title='Ellipticity')
 
         if not self.spec_thread is None:
             if self.spec_thread.is_alive():
@@ -696,7 +709,7 @@ class Controller(QMainWindow, LogObject):
                         filename,
                         ac_blank,
                         dc_blank,
-                        base_blank_exists,
+                        base_blank,
                         det_corr,
                         self.gui.var_pem_off.isChecked()))
                     self.spec_thread.start()
@@ -770,33 +783,12 @@ class Controller(QMainWindow, LogObject):
             self.log('')
             self.log('Run {}/{}'.format(i + 1, reps))
 
-            if self.clicked_init:
-                self.curr_spec = np.array(([[],  # wavelength
-                                            [],  # DC
-                                            [],  # DC stddev
-                                            [],  # CD
-                                            [],  # CD stddev
-                                            [],  # I_L
-                                            [],  # I_L stddev
-                                            [],  # I_R
-                                            [],  # I_R stddev
-                                            [],  # g_abs
-                                            [],  # g_abs stddev
-                                            [],  # molar_ellip
-                                            [],  # molar_ellip stddev
-                                            [],  # ellip
-                                            []]))  # ellip stddev
-
-            elif self.clicked_solvent:
-                self.curr_spec = np.array(([[],  # wavelength
-                                            [],  # DC
-                                            [],  # DC stddev
-                                            [],  # CD
-                                            [],  # CD stddev
-                                            [],  # I_L
-                                            [],  # I_L stddev
-                                            [],  # I_R
-                                            []]))  # I_R stddev
+            self.curr_spec = np.array(([[],  # wavelength
+                                        [],  # DC
+                                        [],  # DC stddev
+                                        [],  # AC
+                                        [],  # AC stddev
+                                        ]))
 
             curr_nm = start_nm - inc
             while ((((direction > 0) and (curr_nm < end_nm)) or ((direction < 0) and (curr_nm > end_nm)))
@@ -820,7 +812,7 @@ class Controller(QMainWindow, LogObject):
                     self.lockin_daq_lock.release()
 
                     if not self.stop_spec_trigger[0]:
-                        # self.log('afeter release {:.3f}'.format(time.time()-t0))
+                        # self.log('after release {:.3f}'.format(time.time()-t0))
                         success = data['success']
                     j += 1
 
@@ -833,6 +825,7 @@ class Controller(QMainWindow, LogObject):
                     data_with_WL = np.array([np.concatenate(([curr_nm], data['data']))])
                     # add dataset to current spectrum
                     self.curr_spec = np.hstack((self.curr_spec, data_with_WL.T))
+
                     if reps > 1:
                         self.add_data_to_avg_spec(data_with_WL, i)
 
@@ -889,32 +882,35 @@ class Controller(QMainWindow, LogObject):
             time.sleep(0.01)
 
     def add_data_to_avg_spec(self, data, curr_rep: int):
-        # avg_spec structure: [[WL],[DC],[AC],[gabs],[ellips]]
+        # avg_spec structure: [[WL],[DC],[AC],[CD],[gabs],[ellips]]
         if curr_rep == 0:
             self.avg_spec = np.hstack((self.avg_spec, np.array(
-                ([data[0][0]], [data[0][self.index_dc]], [data[0][self.index_ac]], [data[0][self.index_gabs]],
-                 [data[0][self.index_ellips]]))))
+                ([data[0][0]], [data[0][self.index_dc]], [data[0][self.index_ac]], [data[0][self.index_cd]],[data[0][self.index_gabs]], [data[0][self.index_ellips]]))))
         else:
             # find index where the wavelength of the new datapoint matches
             index = np.where(self.avg_spec[0] == data[0][0])[0]
             if len(index) > 0:
-                # reaverage DC and AC
+                # reaverage DC and CD
                 self.avg_spec[1][index[0]] = (self.avg_spec[1][index[0]] * curr_rep + data[0][self.index_dc]) / (
                         curr_rep + 1)
                 self.avg_spec[2][index[0]] = (self.avg_spec[2][index[0]] * curr_rep + data[0][self.index_ac]) / (
                         curr_rep + 1)
-                # recalculate gabs #TODO
-                self.avg_spec[3][index[0]] = 2 * self.avg_spec[2][index[0]] / self.avg_spec[1][index[0]]
 
-                # recalculate ellips #TODO
-                self.avg_spec[4][index[0]] = 2 * self.avg_spec[2][index[0]] / self.avg_spec[2][index[0]]
+                # recalculate CD
+                self.avg_spec[2][index[0]] = (self.avg_spec[2][index[0]] / self.avg_spec[1][index[0]])/(self.sample_c * self.path_l)
+
+                # recalculate gabs #TODO
+                self.avg_spec[3][index[0]] = self.avg_spec[2][index[0]] / self.avg_spec[1][index[0]]
+
+                # recalculate ellip
+                self.avg_spec[5][index[0]] = self.avg_spec[2][index[0]] / self.avg_spec[1][index[0]]
 
                 # converts a numpy array to a pandas DataFrame
 
     def np_to_pd(self, spec):
         df = pd.DataFrame(spec.T)
-        df.columns = ['WL', 'DC', 'DC_std', 'AC', 'AC_std', 'I_L', 'I_L_std', 'I_R', 'I_R_std', 'gabs', 'gabs_std',
-                      'ld', 'ld_std', 'ellip', 'ellip', 'molar_ellip', 'molar_ellip']
+        df.columns = ['WL', 'DC', 'DC_std', 'AC', 'AC_std', 'CD', 'CD_std', 'I_L', 'I_L_std', 'I_R', 'I_R_std', 'gabs',
+                      'gabs_std', 'm_ellip', 'm_ellip_std', 'ellip', 'ellip_std']
         df = df.set_index('WL')
         return df
 
@@ -932,23 +928,23 @@ class Controller(QMainWindow, LogObject):
             dfavg['DC_std'] = dfavg['DC_std'] + (dfspectra[i]['DC_std'] / count) ** 2
             dfavg['AC'] = dfavg['AC'] + dfspectra[i]['AC'] / count
             dfavg['AC_std'] = dfavg['AC_std'] + (dfspectra[i]['AC_std'] / count) ** 2
-            dfavg['ld'] = dfavg['ld'] + dfspectra[i]['ld'] / count
-            dfavg['ld_std'] = dfavg['ld_std'] + (dfspectra[i]['ld_std'] / count) ** 2
-            dfavg['mollar_ellips'] = dfavg['mollar_ellips'] + dfspectra[i]['mollar_ellips'] / count
-            dfavg['molar_ellips_std'] = dfavg['molar_ellips_std'] + (dfspectra[i]['molar_ellips_std'] / count) ** 2
-            dfavg['ellips'] = dfavg['ellips'] + dfspectra[i]['ellips'] / count
-            dfavg['ellips_std'] = dfavg['ellips_std'] + (dfspectra[i]['ellips_std'] / count) ** 2
+            dfavg['CD'] = dfavg['CD'] + dfspectra[i]['CD'] / count
+            dfavg['CD_std'] = dfavg['CD_std'] + (dfspectra[i]['CD_std'] / count) ** 2
+            dfavg['m_ellip'] = dfavg['mo_ellip'] + dfspectra[i]['m_ellip'] / count
+            dfavg['m_ellip_std'] = dfavg['molar_ellip_std'] + (dfspectra[i]['m_ellip_std'] / count) ** 2
+            dfavg['ellip'] = dfavg['ellip'] + dfspectra[i]['ellip'] / count
+            dfavg['ellip_std'] = dfavg['ellip_std'] + (dfspectra[i]['ellip_std'] / count) ** 2
         dfavg['AC_std'] = dfavg['AC_std'] ** (0.5)
         dfavg['DC_std'] = dfavg['DC_std'] ** (0.5)
-        dfavg['ld_std'] = dfavg['ld_std'] ** (0.5)
-        dfavg['molar_ellips_std'] = dfavg['molar_ellips_std'] ** (0.5)
-        dfavg['ellips_std'] = dfavg['ellips_std'] ** (0.5)
+        dfavg['CD_std'] = dfavg['CD_std'] ** (0.5)
+        dfavg['m_ellip_std'] = dfavg['m_ellip_std'] ** (0.5)
+        dfavg['ellip_std'] = dfavg['ellip_std'] ** (0.5)
 
         dfavg = self.calc_cd(dfavg)
 
         return dfavg
 
-    def apply_corr(self, dfspec: pd.DataFrame, ac_blank: str, dc_blank: str, base_blank:str, det_corr: str):
+    def apply_corr(self, dfspec: pd.DataFrame, ac_blank: str, dc_blank: str, base_blank: str, det_corr: str):
 
         # Gives True if wavelength region is suitable
         def is_suitable(df_corr: pd.DataFrame, check_index: bool) -> bool:
@@ -1012,7 +1008,7 @@ class Controller(QMainWindow, LogObject):
             else:
                 self.log('AC blank correction file does not contain the measured wavelengths!', True)
 
-                # DC baseline correction
+        # DC baseline correction
         if dc_blank != '':
             self.log('DC blank correction with {}'.format(".\\data\\" + dc_blank + ".csv"))
             df_dc_blank = pd.read_csv(filepath_or_buffer=".\\data\\" + dc_blank + ".csv", sep=',', index_col='WL')
@@ -1026,7 +1022,7 @@ class Controller(QMainWindow, LogObject):
         if base_blank != '':
             self.log('AC blank correction with {}'.format(".\\data\\" + base_blank + ".csv"))
             df_base_blank = pd.read_csv(filepath_or_buffer=".\\data\\" + base_blank + ".csv", sep=',',
-                                      index_col='WL')
+                                        index_col='WL')
 
             if is_suitable(df_base_blank, True):
                 dfspec['AC'] = dfspec['AC'] - df_base_blank['AC']
@@ -1036,7 +1032,7 @@ class Controller(QMainWindow, LogObject):
             else:
                 self.log('Base reading blank correction file does not contain the measured wavelengths!', True)
 
-                # If there are wavelength values in the blankfiles that are not in dfspec this will give NaN values
+        # If there are wavelength values in the blankfiles that are not in dfspec this will give NaN values
         # Drop all rows that contain NaN values
         # The user must make sure that the blank files contain the correct values for the measurement
         dfspec = dfspec.dropna(axis=0)
@@ -1045,24 +1041,74 @@ class Controller(QMainWindow, LogObject):
         return dfspec
 
     def calc_cd(self, df):
+        df['CD'] = ((3298.2 * df['AC']) / (df['DC'] * self.path_l * self.sample_c))
         df['I_L'] = (df['AC'] + df['DC'])
         df['I_R'] = (df['DC'] - df['AC'])
-        df['gabs'] = (df['I_L'] - df['I_R']) / (df['I_L'] - df['I_R'])
+        df['ellip'] = (df['AC'] / df['DC'])
+        df['m_ellip'] = (df['ellip'] / (self.path_l * self.sample_c))
+        df['gabs'] = (df['I_L'] - df['I_R']) / (df['I_L'] + df['I_R'])
+
         # Gaussian error progression
-        df['I_L_std'] = ((df['AC_std']) ** 2 + (df['DC_std']) ** 2) ** 0.5
-        df['I_R_std'] = df['I_L_std'].copy()
-        df['gabs_std'] = ((4 * df['I_R'] ** 2 / (df['I_L'] + df['I_R']) ** 4) * df['I_L_std'] ** 2
-                          + (4 * df['I_L'] ** 2 / (df['I_L'] + df['I_R']) ** 4) * df['I_R_std'] ** 2) ** 0.5
+        # 1. For CD
+        df['CD_std'] = ((3298.2 / (df['DC'] * self.path_l * self.sample_c) * df['AC_std']) ** 2 +
+                        (-3298.2 * df['AC'] / (df['DC'] ** 2 * self.path_l * self.sample_c) * df[
+                            'DC_std']) ** 2) ** 0.5
+        # 2. For I_L
+        df['I_L_std'] = (df['AC_std'] ** 2 + df['DC_std'] ** 2) ** 0.5
+        # 3. For I_R
+        df['I_R_std'] = (df['AC_std'] ** 2 + df['DC_std'] ** 2) ** 0.5
+        # 4. For ellip
+        df['ellip_std'] = ((1 / df['DC'] * df['AC_std']) ** 2 +
+                           (-df['AC'] / df['DC'] ** 2 * df['DC_std']) ** 2) ** 0.5
+        # 5. For m_ellip
+        # Assuming you have a separate std for ellip (as calculated above)
+        df['m_ellip_std'] = (df['ellip_std'] / (self.path_l * self.sample_c))
+        # 6. For gabs
+        # Partial derivatives
+        partial_IL = 2 * df['I_R'] / (df['I_L'] + df['I_R']) ** 2
+        partial_IR = -2 * df['I_L'] / (df['I_L'] + df['I_R']) ** 2
+        # Standard deviation for gabs
+        df['gabs_std'] = ((partial_IL * df['I_L_std']) ** 2 + (partial_IR * df['I_R_std']) ** 2) ** 0.5
 
         return df
 
+    import os
+
     def save_spec(self, dfspec, filename, savefig=True):
-        dfspec.to_csv(".\\data\\" + filename + '.csv', index=True)
-        self.log('Data saved as: {}'.format(".\\data\\" + filename + '.csv'))
-        self.save_params(".\\data\\" + filename)
+        dir_path = ".\\data\\"
+
+        # Check if the directory exists, if not, create it
+        if not os.path.exists(dir_path):
+            os.makedirs(dir_path)
+
+        dfspec.to_csv(dir_path + filename + '.csv', index=True)
+        self.log('Data saved as: {}'.format(dir_path + filename + '.csv'))
+        self.save_params(dir_path + filename)
+
         if savefig:
-            self.gui.spec_fig.savefig(".\\data\\" + filename + '.png')
-            self.log('Figure saved as: {}'.format(".\\data\\" + filename + '.png'))
+            self.save_combined_graphs(dir_path + filename)
+            self.log('Figure saved as: {}'.format(dir_path + filename + '.png'))
+
+    def save_combined_graphs(self, filename):
+        # Create a new figure with 2x2 subplots
+        combined_fig, axs = plt.subplots(2, 2, figsize=(14, 11))
+
+        # List all your figures and their respective axes
+        figures = [self.gui.gabs_fig, self.gui.cd_fig, self.gui.ld_fig, self.gui.ellips_fig]
+        axes = [self.gui.gabs_ax, self.gui.cd_ax, self.gui.ld_ax, self.gui.ellips_ax]
+
+        for idx, (fig, ax) in enumerate(zip(figures, axes)):
+            combined_ax = axs[idx // 2, idx % 2]
+
+            # Copy content from the original axis to the new combined axis
+            for line in ax.get_lines():
+                combined_ax.plot(line.get_xdata(), line.get_ydata(), color=line.get_color())
+
+            # You can also copy over any other elements such as legends, titles, etc.
+
+        combined_fig.tight_layout()
+        combined_fig.savefig(filename + '.png')
+        plt.close(combined_fig)
 
     def save_params(self, filename):
         with open(filename + '_params.txt', 'w') as f:
@@ -1074,8 +1120,7 @@ class Controller(QMainWindow, LogObject):
             f.write('Step = {} nm\n'.format(self.gui.edt_step.text()))
             f.write('Dwell time = {} s\n'.format(self.gui.edt_dwell.text()))
             f.write('Repetitions = {}\n'.format(self.gui.edt_rep.text()))
-            f.write('Exc. WL = {} nm\n'.format(self.gui.edt_excWL.text()))
-            f.write('Comment = {}\n'.format(self.gui.edt_comment.text()))
+            f.write('Comment = {}\n'.format(self.gui.edt_comment.toPlainText()))
             f.write('AC-Blank-File = {}\n'.format(self.gui.edt_ac_blank.text()))
             f.write('DC-Blank-File = {}\n'.format(self.gui.edt_dc_blank.text()))
             f.write('Base-Blank-File = {}\n'.format(self.gui.edt_base.text()))
@@ -1085,6 +1130,9 @@ class Controller(QMainWindow, LogObject):
             f.write('PMT gain = {}\n'.format(self.gui.edt_gain.text()))
             f.write('Input range = {}\n'.format(self.gui.cbx_range.currentText()))
             f.write('Phase offset = {} deg\n'.format(self.gui.edt_phaseoffset.text()))
+            f.write('Sample C = {} mol/l\n'.format(self.gui.edt_rep.text()))
+            f.write('Path l = {} cm\n'.format(self.gui.edt_rep.text()))
+
         self.log('Parameters saved as: {}'.format(".\\data\\" + filename + '_params.txt'))
 
     def abort_measurement(self):

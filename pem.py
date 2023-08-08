@@ -7,6 +7,7 @@ import re
 import math
 import scipy.special
 import queue
+import gui
 
 
 class PEM(VisaDevice):

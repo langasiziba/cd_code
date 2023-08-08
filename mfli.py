@@ -49,6 +49,7 @@ class MFLI(VisaDevice):
 
     sqrt2 = np.sqrt(2)
 
+
     def __init__(self, ID: str, log_name: str, log_queue: queue.Queue, logObject=None):
         super().__init__(logObject=logObject, log_name=log_name)
         self.scope = None
@@ -388,6 +389,13 @@ class MFLI(VisaDevice):
                 # apply sign, correct raw values (Vrms->Vpk) and Bessel correction for AC
                 ac = np.multiply(ac_raw, sgn(ac_theta)) * self.sqrt2 * self.bessel_corr
                 dc = dc_raw
+                # The following are set to dc to be calculated in the controller
+                CD = dc
+                I_L = dc
+                I_R = dc
+                gabs = dc
+                m_ellip = dc
+                ellip = dc
 
                 # print out the average
                 # The error of the values is calculated as the standard deviation in the data set that is collected for one wavelength
@@ -397,7 +405,19 @@ class MFLI(VisaDevice):
                                 np.average(dc),
                                 np.std(dc),
                                 np.average(ac),
-                                np.std(ac)]}
+                                np.std(ac),
+                                np.average(CD),
+                                np.std(CD),
+                                np.average(I_L),
+                                np.std(I_L),
+                                np.average(I_R),
+                                np.std(I_R),
+                                np.average(gabs),
+                                np.std(gabs),
+                                np.average(m_ellip),
+                                np.std(m_ellip),
+                                np.average(ellip),
+                                np.std(ellip)]}
 
                 else:
                     error = True
@@ -417,7 +437,7 @@ class MFLI(VisaDevice):
             self.log('Missing data from MFLI. Returning zeros.', True)
         if error:
             return {'success': False,
-                    'data': np.zeros(14)}
+                    'data': np.zeros(4)}
 
     # reads the phase of CPL, returns the average value
     def read_ac_theta(self, ext_abort_flag: list) -> float:
