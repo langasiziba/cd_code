@@ -56,29 +56,28 @@ class Controller(QMainWindow, LogObject):
     curr_spec = np.array([[],  # wavelength
                           [],  # DC
                           [],  # DC stddev
-                          [],  # CD
-                          [],  # CD stddev
+                          [],  # cd
+                          [],  # cd stddev
                           [],  # I_L
                           [],  # I_L stddev
                           [],  # I_R
                           [],  # I_R stddev
                           [],  # g_abs
                           [],  # g_abs stddev
-                          [],  # ld
-                          [],  # ld stddev
                           [],  # molar_ellip
                           [],  # molar_ellip stddev
                           [],  # ellip
                           []])  # ellip stddev
-    index_ac = 3  # in curr_spec
+    index_cd = 3  # in curr_spec
     index_dc = 1
     index_gabs = 9
-    index_ellips = 14
+    index_ellip = 13
+    index_molarellip = 11
 
     # averaged spectrum during measurement
-    avg_spec = np.array([[],  # wavelenght
+    avg_spec = np.array([[],  # wavelenghth
                          [],  # DC
-                         [],  # AC
+                         [],  # CD
                          [],  # gabs
                          []])  # ellips
 
@@ -212,7 +211,10 @@ class Controller(QMainWindow, LogObject):
                     r'Comment = (.*)\n',
                     r'AC-Blank-File = (.*)\n',
                     r'Phase offset = ([0-9\.]*) deg',
+                    r'Base-Blank-File = (.*)\n',
                     r'DC-Blank-File = (.*)\n',
+                    r'Sample C = ([0-9\.]*) mol/l',
+                    r'Path l = ([0-9\.]*) cm',
                     r'Detector Correction File = (.*)\n']
 
         edts = [self.gui.edt_filename,
@@ -227,7 +229,9 @@ class Controller(QMainWindow, LogObject):
                 self.gui.edt_phaseoffset,
                 self.gui.edt_dc_blank,
                 self.gui.edt_base,
-                self.gui.edt_det_corr
+                self.gui.edt_det_corr,
+                self.gui.edt_samplec,
+                self.gui.edt_pathl
                 ]
 
         for i in range(0, len(keywords)):
@@ -393,6 +397,7 @@ class Controller(QMainWindow, LogObject):
     def log_author_message(self):
         self.log('CD-PLOT v{}'.format(self.version), False, True)
         self.log('Author: Langelihle (Langa) Siziba', False, True)
+        self.log('Based on CatCPL by Winald Kitzmann', False, True)
         self.log('https://github.com/wkitzmann/CatCPL/', False, True)  # TODO: copy and paste the github link
         self.log(
             'CD-PLOT is distributed under the GNU General Public License 3.0 ('
@@ -664,7 +669,7 @@ class Controller(QMainWindow, LogObject):
 
         ac_blank_exists = filename_exists_or_empty(ac_blank)
         dc_blank_exists = filename_exists_or_empty(dc_blank)
-        base_blank_exists = filename_exists_or_empty(dc_blank)
+        base_blank_exists = filename_exists_or_empty(base_blank)
         det_corr_exists = filename_exists_or_empty(det_corr)
 
         if not check_illegal_chars(filename):
@@ -702,7 +707,7 @@ class Controller(QMainWindow, LogObject):
                     if not dc_blank_exists:
                         self.log('Error: DC-blank file does not exist!', True)
                     if not base_blank_exists:
-                        self.log('Error: base reading blank file does not exist!', True)
+                        self.log('Error: Base reading blank file does not exist!', True)
                     if not det_corr_exists:
                         self.log('Error: Detector correction file does not exist!', True)
                     if filename_exists:
@@ -777,8 +782,6 @@ class Controller(QMainWindow, LogObject):
                                             [],  # I_R stddev
                                             [],  # g_abs
                                             [],  # g_abs stddev
-                                            [],  # ld
-                                            [],  # ld stddev
                                             [],  # molar_ellip
                                             [],  # molar_ellip stddev
                                             [],  # ellip

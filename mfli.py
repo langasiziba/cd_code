@@ -273,12 +273,11 @@ class MFLI(VisaDevice):
             for path in paths:
                 self.daq.getAsEvent(path)
 
-        # collects data chunks from MFLI using the low-level poll() command and aligns the channels according to their timestamps
         def poll_data(paths) -> np.array:
             poll_time_step = min(0.1, self.dwell_time * 1.3)
 
-            raw_xy = [[[], [], []]]  # array_y = timestep, x, y
-            filtered_xy = [[[], []]]  # array_x = sample, array_y = x, y
+            raw_xy = [[[], [], [], []]]  # added one more sublist for avg voltage
+            filtered_xy = [[[], [], []]]  # added one more sublist for filtered avg voltage
 
             data_count = 0
             data_per_step = poll_time_step * self.sampling_rate
@@ -299,6 +298,10 @@ class MFLI(VisaDevice):
                     raw_xy[0][1].extend(data_chunk[self.node_paths[0]]['x'])
                     raw_xy[0][2].extend(data_chunk[self.node_paths[0]]['y'])
 
+                    # read the scope to get the average voltage
+                    max_volt, avg_volt = self.read_scope()
+                    raw_xy[0][3].append(avg_volt)
+
                 # find overlap of timestamps between the three samples
                 last_overlap = np.array(raw_xy[0])
                 data_count = last_overlap.size
@@ -311,15 +314,16 @@ class MFLI(VisaDevice):
             # Stop data buffering
             self.daq.unsubscribe('*')
 
-            # identify the timestamps that are identical in all three samples, reduce number of data points to data_set_size (to avoid different numbers of data points at different wavelenghts)
+            # identify the timestamps that are identical in all three samples, reduce number of data points to data_set_size (to avoid different numbers of data points at different wavelengths)
             overlap_timestamps = np_array_tail(last_overlap, int(self.data_set_size))
 
-            # filter the x and y data
+            # filter the x, y, and avg voltage data
             # create a list of bools that marks whether a timestamp is in a sample data set or not
             overlap_bools = np.isin(np.array(raw_xy[0][0]), overlap_timestamps)
-            # save the filtered x and y data in filtered_xy
+            # save the filtered x, y, and avg voltage data in filtered_xy
             filtered_xy[0][0] = np.array(raw_xy[0][1])[overlap_bools]
             filtered_xy[0][1] = np.array(raw_xy[0][2])[overlap_bools]
+            filtered_xy[0][2] = np.array(raw_xy[0][3])[overlap_bools]  # filtered avg voltage
 
             return np.array(filtered_xy)
 
@@ -373,59 +377,28 @@ class MFLI(VisaDevice):
 
             if not all_nan:
                 raw_data = apply_nan_filter(raw_data, nan_filter)
-                scope_data = self.read_scope()
 
-                ac_raw = get_r(raw_data[0])
+                ac_raw = get_r(raw_data[0][:2])  # first two sets of data
+                dc_raw = get_r(raw_data[0][2])  # third set of data
+
                 ac_theta = get_theta(raw_data[0])
 
                 sgn = np.vectorize(get_sign)
 
                 # apply sign, correct raw values (Vrms->Vpk) and Bessel correction for AC
                 ac = np.multiply(ac_raw, sgn(ac_theta)) * self.sqrt2 * self.bessel_corr
-
-                average_value = np.mean(ac_raw)
-                dc = average_value
+                dc = dc_raw
 
                 # print out the average
-                # Calculate CD=AC/DC
-                CD = np.divide(ac, dc)
-                # Calc I_L=(AC+DC)
-                I_L = np.add(ac, dc)
-                # Calc I_R=(DC-AC)
-                I_R = np.subtract(dc, ac)
-                # Calculation of gabs
-                # Element-wise calculations
-                I_L_minus_I_R = np.subtract(I_L, I_R)
-                I_R_plus_I_L = np.add(I_R, I_L)
-                # Element-wise division
-                g_abs = np.divide(I_L_minus_I_R, I_R_plus_I_L)
-                # calculation of molar ellipticity
-                molar_ellip = np.multiply(dc, dc)
-                ellip = np.multiply(dc, dc)
-                # TODO
-                ld = np.add(ac, ac)
-                ld_theta = np.add(ac, ac)
-
-                # The error of the values is calculates as the standard deviation in the data set that is collected for one wavelength
+                # The error of the values is calculated as the standard deviation in the data set that is collected for one wavelength
                 if ac.shape[0] > 0:
                     return {'success': True,
                             'data': [
                                 np.average(dc),
                                 np.std(dc),
-                                np.average(CD),
-                                np.std(CD),
-                                np.average(I_L),
-                                np.std(I_L),
-                                np.average(I_R),
-                                np.std(I_R),
-                                np.average(g_abs),
-                                np.std(g_abs),
-                                np.average(ld),
-                                np.std(ld),
-                                np.average(molar_ellip),
-                                np.std(molar_ellip),
-                                np.average(ellip),
-                                np.std(ellip)]}
+                                np.average(ac),
+                                np.std(ac)]}
+
                 else:
                     error = True
                     self.log(
@@ -435,7 +408,8 @@ class MFLI(VisaDevice):
             else:
                 error = True
                 self.log(
-                    'Error: All NaN in at least one of the channels (AC, DC, Theta, LP or LP theta)! Returning zeros. Printing raw data.',
+                    'Error: All NaN in at least one of the channels (AC, DC, Theta, LP or LP theta)! Returning zeros. '
+                    'Printing raw data.',
                     True)
                 print(raw_data)
         else:
@@ -454,7 +428,8 @@ class MFLI(VisaDevice):
 
         self.log('Recording AC theta...')
 
-        # This function uses poll instead of read for performance reasons. Also no temporal alignment of the data is required
+        # This function uses poll instead of read for performance reasons. Also no temporal alignment of the data is
+        # required
         self.daq.subscribe(path)
         self.daq.sync()
 
