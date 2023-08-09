@@ -172,6 +172,7 @@ class Controller(QMainWindow, LogObject):
             self.gui.signaltuning_group.setEnabled(True)
             self.gui.spectrasetup_group.setEnabled(True)
             self.gui.spectra_group.setEnabled(True)
+            self.gui.spectraset_group.setEnabled(True)
         else:
             self.gui.btn_init.setEnabled(True)  # enable button
             self.gui.btn_solvent.setEnabled(True)
@@ -179,24 +180,8 @@ class Controller(QMainWindow, LogObject):
             self.gui.signaltuning_group.setEnabled(False)
             self.gui.spectrasetup_group.setEnabled(False)
             self.gui.spectra_group.setEnabled(False)
+            self.gui.spectraset_group.setEnabled(False)
 
-    def set_solvent_initialized(self, init):
-        self.initialized = init
-
-        if self.initialized:
-            self.gui.btn_init.setEnabled(False)  # disable button
-            self.gui.btn_solvent.setEnabled(False)
-            self.gui.btn_close.setEnabled(True)  # enable button
-            self.gui.signaltuning_group.setEnabled(True)
-            self.gui.spectrasetup_group.setEnabled(True)
-            self.gui.spectra_group.setEnabled(True)
-        else:
-            self.gui.btn_init.setEnabled(True)  # enable button
-            self.gui.btn_solvent.setEnabled(True)
-            self.gui.btn_close.setEnabled(False)  # disable button
-            self.gui.signaltuning_group.setEnabled(False)
-            self.gui.spectrasetup_group.setEnabled(False)
-            self.gui.spectra_group.setEnabled(False)
 
     def load_last_settings(self):
         def re_search(key, text):
@@ -209,13 +194,13 @@ class Controller(QMainWindow, LogObject):
         with open('last_params.txt', 'r') as f:
             s = f.read()
 
+
         keywords = [r'Spectra Name = (.*)\n',
                     r'Start WL = ([0-9\.]*) nm\n',
                     r'End WL = ([0-9\.]*) nm\n',
                     r'Step = ([0-9\.]*) nm\n',
                     r'Dwell time = ([0-9\.]*) s\n',
                     r'Repetitions = ([0-9]*)\n',
-                    r'Comment = (.*)\n',
                     r'AC-Blank-File = (.*)\n',
                     r'Phase offset = ([0-9\.]*) deg',
                     r'DC-Blank-File = (.*)\n',
@@ -224,27 +209,33 @@ class Controller(QMainWindow, LogObject):
                     r'Sample C = ([0-9\.]*) mol/l',
                     r'Path l = ([0-9\.]*) cm']
 
+        comment_keyword = [r'Comment = (.*)\n']
+
         edts = [self.gui.edt_filename,
                 self.gui.edt_start,
                 self.gui.edt_end,
                 self.gui.edt_step,
                 self.gui.edt_dwell,
                 self.gui.edt_rep,
-                self.gui.edt_WL,
-                self.gui.edt_comment,
                 self.gui.edt_ac_blank,
                 self.gui.edt_phaseoffset,
                 self.gui.edt_dc_blank,
                 self.gui.edt_base,
                 self.gui.edt_det_corr,
                 self.gui.edt_samplec,
-                self.gui.edt_pathl
-                ]
+                self.gui.edt_pathl]
+
+        comment_edt = [self.gui.edt_comment]
 
         for i in range(0, len(keywords)):
             val = re_search(keywords[i], s)
             if val != '':
                 edts[i].setText(val)
+
+        for i in range(0, len(comment_keyword)):
+            val = re_search(comment_keyword[i], s)
+            if val != '':
+                comment_edt[i].setPlainText(val)
 
         blank = re_search('PEM off = ([01])\n', s)
         self.gui.var_pem_off.setChecked(blank == '1')
@@ -337,16 +328,32 @@ class Controller(QMainWindow, LogObject):
                             self.mfli_signal.emit("Ready")
 
                             if b5:
-                                if self.clicked_init:
-                                    self.set_initialized(True)
-                                    self.log('Initialized for sample')
-                                elif self.clicked_solvent:
-                                    self.set_solvent_initialized(True)
-                                    self.log('Initialized for base reading, input solvent')
+                                self.set_initialized(True)
                                 self.move_nm(1000)
                                 QtWidgets.QApplication.processEvents()
                                 self.log('')
                                 self.log('Initialization complete!')
+                                if self.clicked_init:
+                                    self.log('Initialized for sample')
+                                    # Displaying the pop-up message box
+                                    init_msg = QMessageBox()
+                                    init_msg.setIcon(QMessageBox.Information)
+                                    init_msg.setWindowTitle("Notification")
+                                    init_msg.setText("Conduct measurements on sample."
+                                                     "\nSet Base Reading to solvent filename")
+                                    init_msg.setStandardButtons(QMessageBox.Ok)
+                                    init_msg.exec_()
+
+                                elif self.clicked_solvent:
+                                    solvent_msg = QMessageBox()
+                                    solvent_msg.setIcon(QMessageBox.Information)
+                                    solvent_msg.setWindowTitle("Notification")
+                                    solvent_msg.setText("Conduct measurements on solvent."
+                                                        "\nSet filename to meaningful name\n"
+                                                        "For example: watersolvent")
+                                    solvent_msg.setStandardButtons(QMessageBox.Ok)
+                                    solvent_msg.exec_()
+                                    self.log('Initialized for base reading, input solvent')
 
         except Exception as e:
             self.set_initialized(False)
@@ -458,6 +465,7 @@ class Controller(QMainWindow, LogObject):
     def set_active_components(self):
         self.gui.btn_init.setEnabled(not self.initialized)
         self.gui.btn_close.setEnabled(self.initialized)
+        self.gui.spectraset_group.setEnabled(self.initialized)
         self.gui.spectrasetup_group.setEnabled(
             not self.acquisition_running and self.initialized and not self.cal_running)
         self.gui.signaltuning_group.setEnabled(
@@ -521,14 +529,15 @@ class Controller(QMainWindow, LogObject):
         # deactivate init button
         self.gui.btn_init.setEnabled(False)
         self.gui.btn_solvent.setEnabled(False)
-        self.init_devices()
         self.clicked_init = True
+        self.init_devices()
 
     def click_solvent(self):
         self.gui.btn_init.setEnabled(False)
         self.gui.btn_solvent.setEnabled(False)
-        self.init_devices()
         self.clicked_solvent = True
+        self.init_devices()
+
 
     def click_set_pmt(self):
         self.set_PMT_volt_from_edt()
@@ -645,7 +654,7 @@ class Controller(QMainWindow, LogObject):
                                title='DC')
 
             self.gui.plot_spec(self.gui.ellips_fig, self.gui.ellips_canvas, self.gui.ellips_ax,
-                               ellips=[self.curr_spec[0], self.curr_spec[self.index_ellips]],
+                               ellips=[self.curr_spec[0], self.curr_spec[self.index_ellip]],
                                ellips_avg=[self.avg_spec[0], self.avg_spec[5]],
                                title='Ellipticity')
 
@@ -712,7 +721,9 @@ class Controller(QMainWindow, LogObject):
                         base_blank,
                         det_corr,
                         self.gui.var_pem_off.isChecked()))
+
                     self.spec_thread.start()
+                    #import pdb; pdb.set_trace()
                     self.update_spec()
                 else:
                     if not ac_blank_exists:
@@ -757,6 +768,7 @@ class Controller(QMainWindow, LogObject):
         # avg_spec is used to display the averaged spectrum during the measurement
         self.avg_spec = np.array([[],  # wavelength
                                   [],  # DC
+                                  [],  # CD
                                   [],  # AC
                                   [],  # gabs
                                   []])  # ellips
@@ -783,12 +795,23 @@ class Controller(QMainWindow, LogObject):
             self.log('')
             self.log('Run {}/{}'.format(i + 1, reps))
 
-            self.curr_spec = np.array(([[],  # wavelength
-                                        [],  # DC
-                                        [],  # DC stddev
-                                        [],  # AC
-                                        [],  # AC stddev
-                                        ]))
+            self.curr_spec = np.array([[],  # wavelength
+                                      [],  # DC
+                                      [],  # DC stddev
+                                      [],  # AC
+                                      [],  # AC stddev
+                                      [],  # CD
+                                      [],  # CD stddev
+                                      [],  # I_L
+                                      [],  # I_L stddev
+                                      [],  # I_R
+                                      [],  # I_R stddev
+                                      [],  # gabs
+                                      [],  # gabs stddev
+                                      [],  # m_ellip
+                                      [],  # m_ellip stddev
+                                      [],  # ellip
+                                      []])  # ellip stddev
 
             curr_nm = start_nm - inc
             while ((((direction > 0) and (curr_nm < end_nm)) or ((direction < 0) and (curr_nm > end_nm)))
@@ -885,7 +908,8 @@ class Controller(QMainWindow, LogObject):
         # avg_spec structure: [[WL],[DC],[AC],[CD],[gabs],[ellips]]
         if curr_rep == 0:
             self.avg_spec = np.hstack((self.avg_spec, np.array(
-                ([data[0][0]], [data[0][self.index_dc]], [data[0][self.index_ac]], [data[0][self.index_cd]],[data[0][self.index_gabs]], [data[0][self.index_ellips]]))))
+                ([data[0][0]], [data[0][self.index_dc]], [data[0][self.index_ac]], [data[0][self.index_cd]],
+                 [data[0][self.index_gabs]], [data[0][self.index_ellip]]))))
         else:
             # find index where the wavelength of the new datapoint matches
             index = np.where(self.avg_spec[0] == data[0][0])[0]
@@ -897,7 +921,8 @@ class Controller(QMainWindow, LogObject):
                         curr_rep + 1)
 
                 # recalculate CD
-                self.avg_spec[2][index[0]] = (self.avg_spec[2][index[0]] / self.avg_spec[1][index[0]])/(self.sample_c * self.path_l)
+                self.avg_spec[2][index[0]] = (self.avg_spec[2][index[0]] / self.avg_spec[1][index[0]]) / (
+                            self.sample_c * self.path_l)
 
                 # recalculate gabs #TODO
                 self.avg_spec[3][index[0]] = self.avg_spec[2][index[0]] / self.avg_spec[1][index[0]]
@@ -1112,7 +1137,7 @@ class Controller(QMainWindow, LogObject):
 
     def save_params(self, filename):
         with open(filename + '_params.txt', 'w') as f:
-            f.write('Specta Name = {}\n'.format(self.gui.edt_filename.text()))
+            f.write('Spectra Name = {}\n'.format(self.gui.edt_filename.text()))
             f.write('Time = {}\n\n'.format(time.asctime(time.localtime(time.time()))))
             f.write('Setup parameters\n')
             f.write('Start WL = {} nm\n'.format(self.gui.edt_start.text()))
@@ -1130,8 +1155,8 @@ class Controller(QMainWindow, LogObject):
             f.write('PMT gain = {}\n'.format(self.gui.edt_gain.text()))
             f.write('Input range = {}\n'.format(self.gui.cbx_range.currentText()))
             f.write('Phase offset = {} deg\n'.format(self.gui.edt_phaseoffset.text()))
-            f.write('Sample C = {} mol/l\n'.format(self.gui.edt_rep.text()))
-            f.write('Path l = {} cm\n'.format(self.gui.edt_rep.text()))
+            f.write('Sample C = {} mol/l\n'.format(self.gui.edt_samplec.text()))
+            f.write('Path l = {} cm\n'.format(self.gui.edt_pathl.text()))
 
         self.log('Parameters saved as: {}'.format(".\\data\\" + filename + '_params.txt'))
 

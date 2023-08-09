@@ -217,7 +217,11 @@ class MFLI(VisaDevice):
         # read data from oscilloscope and return max. and avg. signal
 
     def read_scope(self):
-        data = self.scope.read(True)
+        if self.scope is None:
+            # Handle this case, maybe raise a more descriptive error or log a warning
+            raise ValueError("Scope has not been initialized!")
+        else:
+            data = self.scope.read(True)
 
         max_volt = 0.0
         avg_volt = 0.0
@@ -254,7 +258,7 @@ class MFLI(VisaDevice):
     # provided by Controller instance
     def read_data(self, ext_abort_flag: list) -> dict:
 
-        # returns the last n elements of an numpy array
+        # returns the last n elements of a numpy array
         def np_array_tail(arr: np.array, n: int):
             if n == 0:
                 return arr[0:0]
@@ -277,8 +281,8 @@ class MFLI(VisaDevice):
         def poll_data(paths) -> np.array:
             poll_time_step = min(0.1, self.dwell_time * 1.3)
 
-            raw_xy = [[[], [], [], []]]  # added one more sublist for avg voltage
-            filtered_xy = [[[], [], []]]  # added one more sublist for filtered avg voltage
+            raw_xy = [[[], [], []]]  # added one more sublist for avg voltage
+            filtered_xy = [[[], []]]  # added one more sublist for filtered avg voltage
 
             data_count = 0
             data_per_step = poll_time_step * self.sampling_rate
@@ -298,10 +302,6 @@ class MFLI(VisaDevice):
                     raw_xy[0][0].extend(data_chunk[self.node_paths[0]]['timestamp'])
                     raw_xy[0][1].extend(data_chunk[self.node_paths[0]]['x'])
                     raw_xy[0][2].extend(data_chunk[self.node_paths[0]]['y'])
-
-                    # read the scope to get the average voltage
-                    max_volt, avg_volt = self.read_scope()
-                    raw_xy[0][3].append(avg_volt)
 
                 # find overlap of timestamps between the three samples
                 last_overlap = np.array(raw_xy[0])
@@ -324,7 +324,6 @@ class MFLI(VisaDevice):
             # save the filtered x, y, and avg voltage data in filtered_xy
             filtered_xy[0][0] = np.array(raw_xy[0][1])[overlap_bools]
             filtered_xy[0][1] = np.array(raw_xy[0][2])[overlap_bools]
-            filtered_xy[0][2] = np.array(raw_xy[0][3])[overlap_bools]  # filtered avg voltage
 
             return np.array(filtered_xy)
 
@@ -380,7 +379,7 @@ class MFLI(VisaDevice):
                 raw_data = apply_nan_filter(raw_data, nan_filter)
 
                 ac_raw = get_r(raw_data[0][:2])  # first two sets of data
-                dc_raw = get_r(raw_data[0][2])  # third set of data
+                dc_raw = np.average(ac_raw)  # third set of data
 
                 ac_theta = get_theta(raw_data[0])
 
