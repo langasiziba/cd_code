@@ -46,6 +46,7 @@ class MFLI(VisaDevice):
     # variables necessary for phaseoffset calibration
     ac_theta_avg = 0.0
     ac_theta_count = 0
+    avg_volt = None
 
     sqrt2 = np.sqrt(2)
 
@@ -224,20 +225,20 @@ class MFLI(VisaDevice):
             data = self.scope.read(True)
 
         max_volt = 0.0
-        avg_volt = 0.0
+        self.avg_volt = 0.0
         if self.devPath + 'scopes/0/wave' in data:
             if 'wave' in data[self.devPath + 'scopes/0/wave'][0][0]:
                 for chunk in data[self.devPath + 'scopes/0/wave'][0][0]['wave']:
                     max_volt = max(max_volt, chunk.max())
-                    avg_volt = statistics.mean(chunk)
+                    self.avg_volt = statistics.mean(chunk)
             else:
                 max_volt = float('nan')
-                avg_volt = float('nan')
+                self.avg_volt = float('nan')
         else:
             max_volt = float('nan')
-            avg_volt = float('nan')
+            self.avg_volt = float('nan')
 
-        return [max_volt, avg_volt]
+        return [max_volt, self.avg_volt]
 
     def stop_scope(self):
         self.scope.finish()
@@ -281,8 +282,8 @@ class MFLI(VisaDevice):
         def poll_data(paths) -> np.array:
             poll_time_step = min(0.1, self.dwell_time * 1.3)
 
-            raw_xy = [[[], [], []]]  # added one more sublist for avg voltage
-            filtered_xy = [[[], []]]  # added one more sublist for filtered avg voltage
+            raw_xy = [[[], [], [], []]]  # added one more sublist for avg voltage
+            filtered_xy = [[[], [], []]]  # added one more sublist for filtered avg voltage
 
             data_count = 0
             data_per_step = poll_time_step * self.sampling_rate
@@ -302,6 +303,9 @@ class MFLI(VisaDevice):
                     raw_xy[0][0].extend(data_chunk[self.node_paths[0]]['timestamp'])
                     raw_xy[0][1].extend(data_chunk[self.node_paths[0]]['x'])
                     raw_xy[0][2].extend(data_chunk[self.node_paths[0]]['y'])
+
+                    avg_volt_length = len(data_chunk[self.node_paths[0]]['timestamp'])
+                    raw_xy[0][3].extend([self.avg_volt] * avg_volt_length)
 
                 # find overlap of timestamps between the three samples
                 last_overlap = np.array(raw_xy[0])
@@ -379,7 +383,7 @@ class MFLI(VisaDevice):
                 raw_data = apply_nan_filter(raw_data, nan_filter)
 
                 ac_raw = get_r(raw_data[0][:2])  # first two sets of data
-                dc_raw = np.average(ac_raw)  # third set of data
+                dc_raw = raw_data[2]  # third set of data
 
                 ac_theta = get_theta(raw_data[0])
 
