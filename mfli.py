@@ -13,6 +13,7 @@ import numpy as np
 import statistics
 import queue
 
+
 from IPython.core.interactiveshell import InteractiveShell
 
 InteractiveShell.ast_node_interactivity = "all"
@@ -46,9 +47,10 @@ class MFLI(VisaDevice):
     # variables necessary for phaseoffset calibration
     ac_theta_avg = 0.0
     ac_theta_count = 0
-    avg_volt = None
 
     sqrt2 = np.sqrt(2)
+    no_path = False
+    no_wave = False
 
 
     def __init__(self, ID: str, log_name: str, log_queue: queue.Queue, logObject=None):
@@ -86,13 +88,13 @@ class MFLI(VisaDevice):
 
     # initialize the api session for data acquisition (daq)
     def setup_for_daq(self, bessel, bessel_lp) -> bool:
-        return self.setup_device(True, True, True, True, True, False, bessel, bessel_lp)
+        return self.setup_device(True, True, True, True, False, bessel, bessel_lp)
 
     # initialize the api session for monitoring the oscilloscope (used for signal tuning)
     def setup_for_scope(self) -> bool:
-        return self.setup_device(False, False, False, False, False, True)
+        return self.setup_device(False, False, False, False, True)
 
-    def setup_device(self, pmt: bool, ch1: bool, ch2: bool, ch3: bool, daqm: bool, scp: bool,
+    def setup_device(self, pmt: bool, ch1: bool, ch2: bool, daqm: bool, scp: bool,
                      bessel: float = 0.0, bessel_lp: float = 0.0) -> bool:
         try:
             if pmt:
@@ -122,13 +124,13 @@ class MFLI(VisaDevice):
                 self.daq.setInt(self.devPath + 'demods/0/enable', 1)
 
             if ch2:
-                self.log('Channel 2 (External reference from PEM)...')
-                self.daq.setInt(self.devPath + 'extrefs/0/enable', 1)
+                self.log('Channel 2...')
+                #Channel 2 (ExtRef)
+                self.daq.setInt(self.devPath+'demods/1/adcselect', 8)
+                self.daq.setInt(self.devPath+'extrefs/0/enable', 1)
+                #deactivate data transfer
+                self.daq.setInt(self.devPath+'demods/1/enable', 0)
 
-            if ch3:
-                self.log('Channel 3...')
-                # Channel 3 (DC, 0 Hz)
-                self.daq.setDouble(self.devPath + 'oscs/0/freq', 0)
 
             if daqm:
                 self.node_paths = [self.devPath + 'demods/0/sample']
@@ -225,20 +227,20 @@ class MFLI(VisaDevice):
             data = self.scope.read(True)
 
         max_volt = 0.0
-        self.avg_volt = 0.0
+        avg_volt = 0.0
         if self.devPath + 'scopes/0/wave' in data:
             if 'wave' in data[self.devPath + 'scopes/0/wave'][0][0]:
                 for chunk in data[self.devPath + 'scopes/0/wave'][0][0]['wave']:
                     max_volt = max(max_volt, chunk.max())
-                    self.avg_volt = statistics.mean(chunk)
+                    avg_volt = statistics.mean(chunk)
             else:
                 max_volt = float('nan')
-                self.avg_volt = float('nan')
+                avg_volt = float('nan')
         else:
             max_volt = float('nan')
-            self.avg_volt = float('nan')
+            avg_volt = float('nan')
 
-        return [max_volt, self.avg_volt]
+        return [max_volt, avg_volt]
 
     def stop_scope(self):
         self.scope.finish()
@@ -282,8 +284,8 @@ class MFLI(VisaDevice):
         def poll_data(paths) -> np.array:
             poll_time_step = min(0.1, self.dwell_time * 1.3)
 
-            raw_xy = [[[], [], [], []]]  # added one more sublist for avg voltage
-            filtered_xy = [[[], [], []]]  # added one more sublist for filtered avg voltage
+            raw_xy = [[[], [], []]]  # added one more sublist for avg voltage
+            filtered_xy = [[[], []]]  # added one more sublist for filtered avg voltage
 
             data_count = 0
             data_per_step = poll_time_step * self.sampling_rate
@@ -303,9 +305,6 @@ class MFLI(VisaDevice):
                     raw_xy[0][0].extend(data_chunk[self.node_paths[0]]['timestamp'])
                     raw_xy[0][1].extend(data_chunk[self.node_paths[0]]['x'])
                     raw_xy[0][2].extend(data_chunk[self.node_paths[0]]['y'])
-
-                    avg_volt_length = len(data_chunk[self.node_paths[0]]['timestamp'])
-                    raw_xy[0][3].extend([self.avg_volt] * avg_volt_length)
 
                 # find overlap of timestamps between the three samples
                 last_overlap = np.array(raw_xy[0])
@@ -383,7 +382,7 @@ class MFLI(VisaDevice):
                 raw_data = apply_nan_filter(raw_data, nan_filter)
 
                 ac_raw = get_r(raw_data[0][:2])  # first two sets of data
-                dc_raw = raw_data[2]  # third set of data
+                dc_raw = np.average(ac_raw)  # third set of data
 
                 ac_theta = get_theta(raw_data[0])
 
