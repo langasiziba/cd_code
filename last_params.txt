@@ -1,0 +1,21 @@
+Specta Name = 
+Time = Tue Aug  8 17:16:28 2023
+
+Setup parameters
+Start WL =  nm
+End WL =  nm
+Step =  nm
+Dwell time =  s
+Repetitions = 
+Comment = 
+AC-Blank-File = 
+DC-Blank-File = 
+Base-Blank-File = 
+PEM off = 0
+Detector Correction File = 
+PMT voltage =  V
+PMT gain = 
+Input range = 0.003
+Phase offset =  deg
+Sample C =  mol/l
+Path l =  cm
