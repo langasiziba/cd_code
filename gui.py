@@ -214,7 +214,7 @@ class Ui_MainWindow(QMainWindow):
         self.signaltuning_group.setFont(font1)
         self.signaltuning_group.setAutoFillBackground(False)
         self.signaltuning_group.setStyleSheet(u"background-color: rgb(195, 195, 255)")
-        self.signaltuning_group.setEnabled(False)
+        self.signaltuning_group.setEnabled(True)
 
         # Oscilloscope Figure
         # Create the figure
@@ -496,9 +496,9 @@ class Ui_MainWindow(QMainWindow):
         self.save_comments.setGeometry(QRect(140, 610, 51, 21))
         self.save_comments.setFont(font2)
         self.save_comments.setStyleSheet(u"background-color: rgb(255, 255, 255)")
-        self.progressBar = QProgressBar(self.spectrasetup_group)
+        self.progressBar = QProgressBar(self.spectraset_group)
         self.progressBar.setObjectName(u"progressBar")
-        self.progressBar.setGeometry(QRect(80, 790, 251, 23))
+        self.progressBar.setGeometry(QRect(80, 85, 251, 23))
         self.progressBar.setFont(font5)
         self.progressBar.setValue(0)
         self.label_33 = QLabel(self.spectrasetup_group)

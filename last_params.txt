@@ -1,5 +1,5 @@
-Specta Name = 
-Time = Tue Aug  8 17:16:28 2023
+Spectra Name = 
+Time = Tue Aug 15 08:10:20 2023
 
 Setup parameters
 Start WL =  nm

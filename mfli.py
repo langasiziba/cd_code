@@ -13,7 +13,6 @@ import numpy as np
 import statistics
 import queue
 
-
 from IPython.core.interactiveshell import InteractiveShell
 
 InteractiveShell.ast_node_interactivity = "all"
@@ -51,7 +50,6 @@ class MFLI(VisaDevice):
     sqrt2 = np.sqrt(2)
     no_path = False
     no_wave = False
-
 
     def __init__(self, ID: str, log_name: str, log_queue: queue.Queue, logObject=None):
         super().__init__(logObject=logObject, log_name=log_name)
@@ -125,12 +123,11 @@ class MFLI(VisaDevice):
 
             if ch2:
                 self.log('Channel 2...')
-                #Channel 2 (ExtRef)
-                self.daq.setInt(self.devPath+'demods/1/adcselect', 8)
-                self.daq.setInt(self.devPath+'extrefs/0/enable', 1)
-                #deactivate data transfer
-                self.daq.setInt(self.devPath+'demods/1/enable', 0)
-
+                # Channel 2 (ExtRef)
+                self.daq.setInt(self.devPath + 'demods/1/adcselect', 8)
+                self.daq.setInt(self.devPath + 'extrefs/0/enable', 1)
+                # deactivate data transfer
+                self.daq.setInt(self.devPath + 'demods/1/enable', 0)
 
             if daqm:
                 self.node_paths = [self.devPath + 'demods/0/sample']
