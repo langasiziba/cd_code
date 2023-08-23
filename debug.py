@@ -1,10 +1,10 @@
-from queue import Queue  # Import the Queue class from the queue module
-from datetime import datetime  # Import the datetime class from the datetime module
 import time
+from datetime import datetime  # Import the datetime class from the datetime module
+from queue import Queue  # Import the Queue class from the queue module
+
 import pyvisa
-from PyQt5.QtCore import QObject, pyqtSignal
+from PyQt5.QtCore import QObject, pyqtSignal, pyqtSlot
 from PyQt5.QtWidgets import QMessageBox
-import traceback
 
 
 class ECommError(Exception):
@@ -18,6 +18,7 @@ will also be used to control error handling for the devices in the system"""
 
 class LogObject(QObject):
     log_signal = pyqtSignal(str)
+    errorSignal = pyqtSignal(str)
 
     def __init__(self, log_name=''):
         super().__init__()
@@ -34,9 +35,7 @@ class LogObject(QObject):
 
         if error or 'error' in ss.lower():
             self.log_queue.put(ss)
-            traceback_message = traceback.format_exc()
-            print(traceback_message)
-            self.show_error_box(ss)
+            self.errorSignal.emit(ss)
         elif not self.log_queue.full():
             self.log_queue.put(ss)
             self.error_emitted = False
@@ -48,14 +47,6 @@ class LogObject(QObject):
 
     def log_answer(self, s: str):
         self.log('>> {}'.format(s))
-
-    def show_error_box(self, s: str):
-        error_box = QMessageBox()  # Create a QMessageBox instance
-        error_box.setWindowTitle('Error')
-        error_box.setText(s)
-        error_box.setIcon(QMessageBox.Icon.Critical)
-        error_box.addButton(QMessageBox.StandardButton.Ok)
-        error_box.exec()
 
     def close(self):
         self.log('Closing logger...')

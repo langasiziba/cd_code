@@ -5,9 +5,9 @@ from debug import ECommError
 import pyvisa
 import re
 import math
-import scipy.special
+from math import pi
+from scipy.special import jv
 import queue
-import gui
 
 
 class PEM(VisaDevice):
@@ -23,8 +23,8 @@ class PEM(VisaDevice):
         self.float_acc = 0.025
 
         # Correction factors
-        self.bessel_corr = 1 / (2 * scipy.special.jv(1, self.retardation * 2 * scipy.pi))
-        self.bessel_corr_lp = 1 / (2 * scipy.special.jv(2, self.retardation * 2 * scipy.pi))
+        self.bessel_corr = 1 / (2 * jv(1, self.retardation * 2 * pi))
+        self.bessel_corr_lp = 1 / (2 * jv(2, self.retardation * 2 * pi))
 
     def initialize(self, rm: pyvisa.ResourceManager, log_queue: queue.Queue) -> bool:
         self.rm = rm

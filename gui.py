@@ -40,10 +40,29 @@ class Ui_MainWindow(QMainWindow):
     def update_mono(self, s):
         self.txt_monoi.setText(f"{s}")
         self.txt_monoii.setText(f"{s}")
+        self.edt_WL.setText(f"{s}")
+        self.edt_WL.setStyleSheet(u"background-color: rgb(225, 255, 255)")
 
     @pyqtSlot(str)
     def append_to_log(self, text):
-        self.debug_log.appendPlainText(text)  # Assuming debug_log_textedit is your QTextEdit widget
+        self.debug_log.appendPlainText(text)
+
+    @pyqtSlot(float)
+    def update_progress(self, value: float):
+        self.progressBar.setValue(int(round(float(value))))
+
+    @pyqtSlot(str)
+    def update_time(self, text: str):
+        self.label_40.setText(text)
+
+    @pyqtSlot(str)
+    def show_error_box(self, s: str):
+        error_box = QMessageBox()  # Create a QMessageBox instance
+        error_box.setWindowTitle('Error')
+        error_box.setText(s)
+        error_box.setIcon(QMessageBox.Icon.Critical)
+        error_box.addButton(QMessageBox.StandardButton.Ok)
+        error_box.exec()
 
     def plot(self, fig, canvas, ax, xlabel, ylabel, title, data, avgdata=[]):
         ax.clear()
@@ -125,11 +144,11 @@ class Ui_MainWindow(QMainWindow):
             left=0.05,
             bottom=0.1,
             right=0.985,
-            top=0.985,
+            top=0.9,
             wspace=0.0,
             hspace=0.4)
 
-        fig.set_facecolor("#FFEDCC")
+        fig.set_facecolor("#c3ffff")
         ax.axhline(y=0.0, color="#0000004E", linestyle='-')
         canvas.draw()
 
@@ -237,7 +256,7 @@ class Ui_MainWindow(QMainWindow):
             top=0.985,
             wspace=0.0,
             hspace=0.0)
-        self.osc_widget.setGeometry(20, 20, 321, 191)
+        self.osc_widget.setGeometry(20, 25, 321, 191)
         self.osc_canvas.draw()
 
         self.label_9 = QLabel(self.signaltuning_group)
@@ -292,6 +311,15 @@ class Ui_MainWindow(QMainWindow):
         self.btn_set_gain.setGeometry(QRect(250, 330, 51, 24))
         self.btn_set_gain.setFont(font4)
         self.btn_set_gain.setStyleSheet(u"background-color: rgb(255, 255, 255)")
+        self.btn_set_point = QPushButton(self.signaltuning_group)
+        self.btn_set_point.setObjectName(u"btn_set_point")
+        self.btn_set_point.setGeometry(QRect(250, 530, 51, 24))
+        self.btn_set_point.setFont(font4)
+        self.btn_set_point.setStyleSheet(u"background-color: rgb(255, 255, 255)")
+        self.edt_setpoint = QLineEdit(self.signaltuning_group)
+        self.edt_setpoint.setObjectName(u"edt_setpoint")
+        self.edt_setpoint.setGeometry(QRect(110, 530, 113, 21))
+        self.edt_setpoint.setStyleSheet(u"background-color: rgb(255, 255, 255)")
         self.btn_set_WL = QPushButton(self.signaltuning_group)
         self.btn_set_WL.setObjectName(u"btn_set_WL")
         self.btn_set_WL.setGeometry(QRect(250, 370, 51, 24))
@@ -353,12 +381,15 @@ class Ui_MainWindow(QMainWindow):
         self.btn_set_PMT.raise_()
         self.label_26.raise_()
         self.btn_set_gain.raise_()
+        self.btn_set_point.raise_()
+
         self.btn_set_WL.raise_()
         self.cbx_range.raise_()
         self.edt_gain.raise_()
         self.edt_WL.raise_()
         self.btn_autorange.raise_()
         self.edt_pmt.raise_()
+        self.edt_setpoint.raise_()
         self.edt_phaseoffset.raise_()
         self.btn_set_phaseoffset.raise_()
         self.btn_cal_phaseoffset.raise_()
@@ -501,6 +532,11 @@ class Ui_MainWindow(QMainWindow):
         self.progressBar.setGeometry(QRect(80, 85, 251, 23))
         self.progressBar.setFont(font5)
         self.progressBar.setValue(0)
+        self.label_40 = QLabel(self.spectraset_group)
+        self.label_40.setGeometry(QRect(80, 110, 251, 23))
+        self.label_40.setFont(font2)
+        self.label_40.setObjectName(u"label_40")
+
         self.label_33 = QLabel(self.spectrasetup_group)
         self.label_33.setObjectName(u"label_33")
         self.label_33.setGeometry(QRect(140, 650, 71, 16))
@@ -616,7 +652,6 @@ class Ui_MainWindow(QMainWindow):
         self.ellips_widget.setGeometry(360, 290, 341, 221)
         self.ellips_canvas.draw()
 
-
         self.debug_group = QGroupBox(self.centralwidget)
         self.debug_group.setObjectName(u"debug_group")
         self.debug_group.setGeometry(QRect(780, 540, 691, 321))
@@ -657,6 +692,7 @@ class Ui_MainWindow(QMainWindow):
         self.edt_samplec.setValidator(validator2)
         self.edt_pathl.setValidator(validator2)
         self.edt_pmt.setValidator(validator1)
+        self.edt_setpoint.setValidator(validator1)
 
         MainWindow.setCentralWidget(self.centralwidget)
 
@@ -694,6 +730,7 @@ class Ui_MainWindow(QMainWindow):
         self.var_pem_off.setText(QCoreApplication.translate("MainWindow", u"PEM off", None))
         self.label_26.setText(QCoreApplication.translate("MainWindow", u"Phase Offset:", None))
         self.btn_set_gain.setText(QCoreApplication.translate("MainWindow", u"Set", None))
+        self.btn_set_point.setText(QCoreApplication.translate("MainWindow", u"Set", None))
         self.btn_set_WL.setText(QCoreApplication.translate("MainWindow", u"Set", None))
         self.btn_autorange.setText(QCoreApplication.translate("MainWindow", u"AUTO", None))
         self.btn_set_phaseoffset.setText(QCoreApplication.translate("MainWindow", u"Set", None))
@@ -714,6 +751,7 @@ class Ui_MainWindow(QMainWindow):
         self.btn_abort.setText(QCoreApplication.translate("MainWindow", u"Stop", None))
         self.save_comments.setText(QCoreApplication.translate("MainWindow", u"Save", None))
         self.label_33.setText(QCoreApplication.translate("MainWindow", u"*required", None))
+        self.label_40.setText(QCoreApplication.translate("MainWindow", u"time remaining", None))
         self.label_34.setText(QCoreApplication.translate("MainWindow", u"Path length(mm):", None))
         self.spectra_group.setTitle(QCoreApplication.translate("MainWindow", u"Spectra", None))
         self.debug_group.setTitle(QCoreApplication.translate("MainWindow", u"Debug log", None))

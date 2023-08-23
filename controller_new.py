@@ -4,28 +4,28 @@ import os
 import queue
 import re
 import threading as th
+import time
 
 import numpy as np
 import pandas as pd
 import pyvisa
 from PyQt5 import QtWidgets
-from PyQt5.QtCore import QCoreApplication, pyqtSignal
+from PyQt5.QtCore import QCoreApplication, pyqtSignal, pyqtSlot
+from PyQt5.QtCore import QTimer
+from PyQt5.QtWidgets import QApplication, QDialog, QLabel, QPushButton, QVBoxLayout
 from PyQt5.QtWidgets import QMainWindow, QMessageBox
 from matplotlib import pyplot as plt
 
-from PyQt5.QtWidgets import QApplication, QDialog, QLabel, QPushButton, QVBoxLayout
-from PyQt5.QtCore import QTimer
-import time
-from debug import VisaDevice
-
 import gui
 from debug import LogObject
+from debug import VisaDevice
 from mfli import MFLI
 from mono import Monoi, Monoii
 from pem import PEM
 
 
 # Combines the individual components and controls the main window
+# noinspection PyUnresolvedReferences
 class Controller(QMainWindow, LogObject):
     # update_mono_edt_lbl_signal = pyqtSignal(float)
 
@@ -99,10 +99,15 @@ class Controller(QMainWindow, LogObject):
     cal_theta_thread = None
     initialized = False
     log_signal = pyqtSignal(str)
+    errorSignal = pyqtSignal(str)
+    progress_signal = pyqtSignal(float)
+    time_signal = pyqtSignal(str)
     closeSignal = pyqtSignal()
     mfli_signal = pyqtSignal(str)
     mono_signal = pyqtSignal(str)
     pem_signal = pyqtSignal(str)
+    update_PMT_voltage_edt_signal = pyqtSignal(float)
+    setpoint_signal = pyqtSignal()
     clicked_init = False
     clicked_solvent = False
 
@@ -111,12 +116,21 @@ class Controller(QMainWindow, LogObject):
     def __init__(self):
         super().__init__(log_name='CTRL')
 
+        self.setpoint = 0.0
+        self.max_volt_history = None
+        self.lockin_osc = None
+        self.monoii = None
+        self.monoi = None
+        self.pem = None
+        self.sample_c = 0.0
+        self.path_l = 0.0
         self.calibration_dialog = None
         self.pem_lock = th.Lock()  # TODO
         self.monoi_lock = th.Lock()
         self.monoii_lock = th.Lock()
         self.lockin_daq_lock = th.Lock()
         self.lockin_osc_lock = th.Lock()
+        self.lockin_daq = None
 
         # This trigger to stop spectra acquisition is a list to pass it by reference to the read_data thread
         self.stop_spec_trigger = [False]
@@ -148,6 +162,17 @@ class Controller(QMainWindow, LogObject):
         self.log_update_interval = 100
         self.log_signal.connect(self.gui.append_to_log)
         self.log_author_message()
+
+        self.errorSignal.connect(self.gui.show_error_box)
+
+        self.progress_signal.connect(self.gui.update_progress)
+
+        self.time_signal.connect(self.gui.update_time)
+
+        # noinspection PyUnresolvedReferences
+        self.update_PMT_voltage_edt_signal.connect(self.update_PMT_voltage_edt)
+
+        self.setpoint_signal.connect(self.setpoint_from_edt)
 
         # Create a QTimer for the log
         self.timer = QTimer()
@@ -181,7 +206,7 @@ class Controller(QMainWindow, LogObject):
             self.gui.btn_init.setEnabled(True)  # enable button
             self.gui.btn_solvent.setEnabled(True)
             self.gui.btn_close.setEnabled(False)  # disable button
-            self.gui.signaltuning_group.setEnabled(True)
+            self.gui.signaltuning_group.setEnabled(False)
             self.gui.spectrasetup_group.setEnabled(False)
             self.gui.spectra_group.setEnabled(False)
             self.gui.spectraset_group.setEnabled(False)
@@ -262,6 +287,7 @@ class Controller(QMainWindow, LogObject):
             self.pem_lock.acquire()
             self.pem = PEM(logObject=self, log_name='PEM')
             self.pem.log_signal.connect(self.gui.append_to_log)
+            self.pem.errorSignal.connect(self.gui.show_error_box)
             QtWidgets.QApplication.processEvents()
             b1 = self.pem.initialize(rm_pem, self.log_queue)
             self.pem_lock.release()
@@ -275,7 +301,7 @@ class Controller(QMainWindow, LogObject):
                 QtWidgets.QApplication.processEvents()
                 self.monoi_lock.acquire()
                 self.monoi = Monoi(logObject=self, log_name='MONO1')
-                self.monoi.log_signal.connect(self.gui.append_to_log)
+                self.monoi.errorSignal.connect(self.gui.show_error_box)
                 QtWidgets.QApplication.processEvents()
                 b2 = self.monoi.initialize(rm_mono, self.log_queue)
                 self.monoi_lock.release()
@@ -289,6 +315,7 @@ class Controller(QMainWindow, LogObject):
                     self.monoii_lock.acquire()
                     self.monoii = Monoii(logObject=self, log_name='MONO2')
                     self.monoii.log_signal.connect(self.gui.append_to_log)
+                    self.monoii.errorSignal.connect(self.gui.show_error_box)
                     QtWidgets.QApplication.processEvents()
                     b3 = self.monoii.initialize(rm_mono, self.log_queue)
                     self.monoii_lock.release()
@@ -302,11 +329,12 @@ class Controller(QMainWindow, LogObject):
                         self.lockin_daq_lock.acquire()
                         self.lockin_daq = MFLI('dev7024', 'LID', self.log_queue, logObject=self)
                         self.lockin_daq.log_signal.connect(self.gui.append_to_log)
+                        self.lockin_daq.errorSignal.connect(self.gui.show_error_box)
                         QtWidgets.QApplication.processEvents()
                         b4 = self.lockin_daq.connect()
                         QtWidgets.QApplication.processEvents()
                         b4 = b4 and self.lockin_daq.setup_for_daq(self.pem.bessel_corr, self.pem.bessel_corr_lp)
-                        self.update_PMT_voltage_edt(self.lockin_daq.pmt_volt)
+                        self.update_PMT_voltage_edt_signal.emit(self.lockin_daq.pmt_volt)
                         self.lockin_daq_lock.release()
                         self.set_phaseoffset_from_edt()
                         QtWidgets.QApplication.processEvents()
@@ -318,6 +346,7 @@ class Controller(QMainWindow, LogObject):
                             self.lockin_osc_lock.acquire()
                             self.lockin_osc = MFLI('dev7024', 'LIA', self.log_queue, logObject=self)
                             self.lockin_osc.log_signal.connect(self.gui.append_to_log)
+                            self.lockin_osc.errorSignal.connect(self.gui.show_error_box)
                             QtWidgets.QApplication.processEvents()
                             b5 = self.lockin_osc.connect()
                             QtWidgets.QApplication.processEvents()
@@ -443,6 +472,10 @@ class Controller(QMainWindow, LogObject):
         self.gui.edt_gain.textChanged.connect(lambda: self.edt_changed('gain'))
         self.gui.edt_gain.returnPressed.connect(self.enter_gain)
 
+        self.gui.btn_set_point.clicked.connect(self.click_set_point)
+        self.gui.edt_setpoint.textChanged.connect(lambda: self.edt_changed('setpoint'))
+        self.gui.edt_setpoint.returnPressed.connect(self.enter_setpoint)
+
         self.gui.btn_set_WL.clicked.connect(self.click_set_signal_WL)
         self.gui.edt_WL.textChanged.connect(lambda: self.edt_changed('WL'))
         self.gui.edt_WL.returnPressed.connect(self.enter_signal_WL)
@@ -471,11 +504,11 @@ class Controller(QMainWindow, LogObject):
         self.gui.spectrasetup_group.setEnabled(
             not self.acquisition_running and self.initialized and not self.cal_running)
         self.gui.signaltuning_group.setEnabled(
-        not self.acquisition_running and self.initialized and not self.cal_collecting)
+            not self.acquisition_running and self.initialized and not self.cal_collecting)
         self.gui.btn_start.setEnabled(not self.acquisition_running and self.initialized and not self.cal_running)
         self.gui.btn_abort.setEnabled(self.initialized and self.acquisition_running and not self.cal_running)
         self.gui.btn_cal_phaseoffset.setEnabled(
-        not self.acquisition_running and self.initialized and not self.cal_running)
+            not self.acquisition_running and self.initialized and not self.cal_running)
 
     def window_update(self):
         QApplication.processEvents()
@@ -485,10 +518,13 @@ class Controller(QMainWindow, LogObject):
 
     # TODO: no color is actually changing here
     def edt_changed(self, var):
+        global edt
         if var == 'pmt':
             edt = self.gui.edt_pmt
         elif var == 'gain':
             edt = self.gui.edt_gain
+        elif var == 'setpoint':
+            edt = self.gui.edt_setpoint
         elif var == 'WL':
             edt = self.gui.edt_WL
         elif var == 'phaseoffset':
@@ -500,14 +536,60 @@ class Controller(QMainWindow, LogObject):
             v = float(self.gui.edt_pmt.text())
             if 0.0 <= v <= 1.1:
                 self.set_PMT_voltage(v)
+                self.gui.edt_pmt.setStyleSheet("background-color: #FFFFFF")
+            else:
+                self.log('PMT input must be between 0.0V and 1.1V', True)
+                self.gui.edt_pmt.setStyleSheet("background-color: #FFCCCC")
         except ValueError as e:
             self.log(f'Error in set_PMT_voltage_from_edt: {e}', True)
+
+    def setpoint_from_edt(self):
+        try:
+            v = float(self.gui.edt_setpoint.text())
+            if 0.0 <= v <= 1.1:
+                self.setpoint = v
+                self.set_gain_from_dc(self.setpoint)
+                self.gui.edt_setpoint.setStyleSheet("background-color: #FFFFFF")
+            else:
+                self.log('Setpoint must be between 0.0V and 1.1V', True)
+                self.gui.edt_setpoint.setStyleSheet("background-color: #FFCCCC")
+        except ValueError as e:
+            self.log(f'Error in setpoint_from_edt: {e}', True)
+
+    def set_gain_from_dc(self, setpoint, threshold=0.01):
+        pid = PIDController(kp=1.2, ki=1.0, kd=0.5)
+
+        while True:
+            # Measure the DC voltage (replace with actual measurement code)
+            while np.isnan(self.avg_volt):
+                time.sleep(0.001)  # Wait for 1 ms
+            measured_value = self.avg_volt
+
+            # Update the PID controller
+            control_output = pid.update(setpoint, measured_value)
+            error = setpoint - measured_value
+
+            # Convert the control output to gain and set the PMT voltage
+            gain = control_output  # Modify as needed
+            volt = self.gain_to_volt(gain)
+            self.set_PMT_voltage(volt)
+
+            # Wait for the system to stabilize
+            time.sleep(0.5)
+
+            # Check if the error is within the threshold
+            if abs(error) < threshold:
+                break
 
     def set_gain_from_edt(self):
         try:
             g = float(self.gui.edt_gain.text())
             if g <= self.max_gain:
                 self.set_PMT_voltage(self.gain_to_volt(g))
+                self.gui.edt_gain.setStyleSheet("background-color: #FFFFFF")
+            else:
+                self.log(f'Gain must be less than {self.max_gain}', True)
+                self.gui.edt_gain.setStyleSheet("background-color: #FFCCCC")
         except ValueError as e:
             self.log(f'Error in set_gain_from_edt: {e}', True)
 
@@ -515,6 +597,7 @@ class Controller(QMainWindow, LogObject):
         try:
             nm = float(self.gui.edt_WL.text())
             self.move_nm(nm)
+            self.gui.edt_WL.setStyleSheet("background-color: #FFFFFF")
         except ValueError as e:
             self.log(f'Error in set_WL_from_edt: {e}', True)
 
@@ -549,8 +632,14 @@ class Controller(QMainWindow, LogObject):
     def click_set_gain(self):
         self.set_gain_from_edt()
 
+    def click_set_point(self):
+        self.setpoint_from_edt()
+
     def enter_gain(self):
         self.click_set_gain()
+
+    def enter_setpoint(self):
+        self.click_set_point()
 
     def click_set_signal_WL(self):
         self.set_WL_from_edt()
@@ -582,8 +671,7 @@ class Controller(QMainWindow, LogObject):
     def update_phaseoffset_edt(self, value: float):
         self.gui.edt_phaseoffset.setText('{:.3f}'.format(value))
 
-    def update_progress_bar(self, start: float, stop: float, curr: float, run: int, run_count: int,
-                            time_since_start: float):
+    def update_progress_bar(self, start, stop, curr, run, run_count, time_since_start):
         # Calculate progress in percent
         if stop > start:
             f = (1 - (stop - curr) / (stop - start)) * 100
@@ -605,12 +693,8 @@ class Controller(QMainWindow, LogObject):
             unit = 'h'
             time_left = time_left / 3600
 
-        # Update progress bar value
-        self.gui.progressBar.setValue(int(round(f)))
-
-        # Update label text
-        self.gui.progressBar.setToolTip(
-            '{:.1f} % ({:d}/{:d}), ca. {:.1f} {}'.format(f, run, run_count, time_left, unit))
+        self.progress_signal.emit(float(f))
+        self.time_signal.emit(f"{int(time_left)} {unit}")
 
     def update_osc_captions(self, curr: float, label):
         # setting a breakpoint here
@@ -629,6 +713,7 @@ class Controller(QMainWindow, LogObject):
         ))
         self.timer.start(self.osc_refresh_delay)  # start timer
 
+    @pyqtSlot(float)
     def update_PMT_voltage_edt(self, volt):
         self.gui.edt_pmt.setText('{:.3f}'.format(volt))
         self.gui.edt_gain.setText('{:.3f}'.format(self.volt_to_gain(volt)))
@@ -647,7 +732,7 @@ class Controller(QMainWindow, LogObject):
             self.gui.plot_spec(self.gui.cd_fig, self.gui.cd_canvas, self.gui.cd_ax,
                                cd=[self.curr_spec[0], self.curr_spec[self.index_ac]],
                                cd_avg=[self.avg_spec[0], self.avg_spec[3]],
-                               title='CD')
+                               title='AC')
 
             self.gui.plot_spec(self.gui.ld_fig, self.gui.ld_canvas, self.gui.ld_ax,
                                tot=[self.curr_spec[0], self.curr_spec[self.index_dc]],
@@ -659,7 +744,7 @@ class Controller(QMainWindow, LogObject):
                                ellips_avg=[self.avg_spec[0], self.avg_spec[5]],
                                title='Ellipticity')
 
-        if not self.spec_thread is None:
+        if self.spec_thread is not None:
             if self.spec_thread.is_alive():
                 QTimer.singleShot(self.spec_refresh_delay, self.update_spec)
 
@@ -703,7 +788,8 @@ class Controller(QMainWindow, LogObject):
                     s = '_1'
                 filename_exists = filename_exists_or_empty(filename + s)
 
-                error = not ac_blank_exists or not dc_blank_exists or not det_corr_exists or filename_exists or not base_blank_exists
+                error = not ac_blank_exists or not dc_blank_exists or not det_corr_exists or filename_exists or not \
+                    base_blank_exists
 
                 if not error:
                     self.stop_spec_trigger[0] = False
@@ -747,6 +833,9 @@ class Controller(QMainWindow, LogObject):
                     ac_blank: str, dc_blank: str, base_blank: str, det_corr: str, pem_off: int):
 
         global data
+
+        self.path_l = float(self.gui.edt_pathl.text())
+        self.sample_c = float(self.gui.edt_samplec.text())
 
         # try:
         self.log('')
@@ -820,6 +909,7 @@ class Controller(QMainWindow, LogObject):
 
                 curr_nm = curr_nm + inc
                 self.move_nm(curr_nm, pem_off == 0)
+                #self.setpoint_signal.emit()
 
                 self.interruptable_sleep(self.lowpass_filter_risetime)
 
@@ -860,21 +950,23 @@ class Controller(QMainWindow, LogObject):
                         -1] = self.avg_volt  # Here, 1 is the index for DC and -1 denotes the last element
 
                     # Now you can start your calculations here
-                    AC = self.curr_spec[3][-1]
-                    DC = self.curr_spec[1][-1]
-                    AC_std = self.curr_spec[4][-1]
-                    DC_std = self.curr_spec[2][-1]
+                    AC = float(self.curr_spec[3][-1])
+                    DC = float(self.curr_spec[1][-1])
+                    AC_std = float(self.curr_spec[4][-1])
+                    DC_std = float(self.curr_spec[2][-1])
 
                     # Calculations as an example
-                    CD = ((3298.2 * AC) / (DC * self.path_l * self.sample_c))
+                    delta_A = (AC) / (2.303 * DC)
+                    delta_E = (delta_A) / (self.path_l * self.sample_c)
                     I_L = (AC + DC)
                     I_R = (DC - AC)
-                    ellip = (AC / DC)
-                    m_ellip = (ellip / (self.path_l * self.sample_c))
-                    gabs = (I_L - I_R) / (I_L + I_R)
+                    ellip = 32.982 * delta_A
+                    m_ellip = 3298 * delta_E
+                    gabs = AC / DC
+                    CD = delta_A
 
                     # Add the calculated values to their respective rows in curr_spec
-                    self.curr_spec[5][-1] = CD
+                    self.curr_spec[5][-1] = AC
                     self.curr_spec[7][-1] = I_L
                     self.curr_spec[9][-1] = I_R
                     self.curr_spec[15][-1] = ellip
@@ -882,31 +974,22 @@ class Controller(QMainWindow, LogObject):
                     self.curr_spec[11][-1] = gabs
 
                     # Gaussian error progression
-                    # 1. For CD
-                    CD_std = ((3298.2 / (DC * self.path_l * self.sample_c) * AC_std) ** 2 +
-                              (-3298.2 * AC / (DC ** 2 * self.path_l * self.sample_c) * DC_std) ** 2) ** 0.5
+                    delta_A_std = ((1 / (2.303 * DC) * AC_std) ** 2 +
+                                   (-AC / (2.303 * DC ** 2) * DC_std) ** 2) ** 0.5
 
-                    # 2. For I_L
+                    delta_E_std = (delta_A_std / (self.path_l * self.sample_c))
+
                     I_L_std = (AC_std ** 2 + DC_std ** 2) ** 0.5
 
-                    # 3. For I_R
                     I_R_std = (AC_std ** 2 + DC_std ** 2) ** 0.5
 
-                    # 4. For ellip
-                    ellip_std = ((1 / DC * AC_std) ** 2 +
-                                 (-AC / DC ** 2 * DC_std) ** 2) ** 0.5
+                    ellip_std = 32.982 * delta_A_std
 
-                    # 5. For m_ellip
-                    # Assuming you have a separate std for ellip (as calculated above)
-                    m_ellip_std = (ellip_std / (self.path_l * self.sample_c))
+                    m_ellip_std = 3298 * delta_E_std
 
-                    # 6. For gabs
-                    # Partial derivatives
-                    partial_IL = 2 * I_R / (I_L + I_R) ** 2
-                    partial_IR = -2 * I_L / (I_L + I_R) ** 2
+                    gabs_std = ((1 / DC * AC_std) ** 2 + (-AC / DC ** 2 * DC_std) ** 2) ** 0.5
 
-                    # Standard deviation for gabs
-                    gabs_std = ((partial_IL * I_L_std) ** 2 + (partial_IR * I_R_std) ** 2) ** 0.5
+                    CD_std = delta_A_std
 
                     # Add the calculated std values to their respective rows in curr_spec
                     self.curr_spec[6][-1] = CD_std
@@ -963,8 +1046,7 @@ class Controller(QMainWindow, LogObject):
         self.move_nm(start_nm, move_pem=True)
 
         self.stop_spec_trigger[0] = False
-        # except Exception as e:
-        # self.log("Error in record_spec: {}".format(str(e)))
+
 
     def interruptable_sleep(self, t: float):
         start = time.time()
@@ -1133,36 +1215,38 @@ class Controller(QMainWindow, LogObject):
         return dfspec
 
     def calc_cd(self, df):
-        df['CD'] = ((3298.2 * df['AC']) / (df['DC'] * self.path_l * self.sample_c))
-        df['I_L'] = (df['AC'] + df['DC'])
-        df['I_R'] = (df['DC'] - df['AC'])
-        df['ellip'] = (df['AC'] / df['DC'])
-        df['m_ellip'] = (df['ellip'] / (self.path_l * self.sample_c))
-        df['gabs'] = (df['I_L'] - df['I_R']) / (df['I_L'] + df['I_R'])
+        # Primary Calculations
+        delta_A = df['AC'] / (2.303 * df['DC'])
+        delta_E = delta_A / (self.path_l * self.sample_c)
+        df['I_L'] = df['AC'] + df['DC']
+        df['I_R'] = df['DC'] - df['AC']
+        df['ellip'] = 32.982 * delta_A
+        df['m_ellip'] = 3298 * delta_E
+        df['gabs'] = df['AC'] / df['DC']
+        df['CD'] = df['delta_A']
 
         # Gaussian error progression
-        # 1. For CD
-        df['CD_std'] = ((3298.2 / (df['DC'] * self.path_l * self.sample_c) * df['AC_std']) ** 2 +
-                        (-3298.2 * df['AC'] / (df['DC'] ** 2 * self.path_l * self.sample_c) * df[
-                            'DC_std']) ** 2) ** 0.5
-        # 2. For I_L
+        delta_A_std = ((1 / (2.303 * df['DC']) * df['AC_std']) ** 2 +
+                             (-df['AC'] / (2.303 * df['DC'] ** 2) * df['DC_std']) ** 2) ** 0.5
+
+        delta_E_std = delta_A_std / (self.path_l * self.sample_c)
+
         df['I_L_std'] = (df['AC_std'] ** 2 + df['DC_std'] ** 2) ** 0.5
-        # 3. For I_R
+
         df['I_R_std'] = (df['AC_std'] ** 2 + df['DC_std'] ** 2) ** 0.5
-        # 4. For ellip
-        df['ellip_std'] = ((1 / df['DC'] * df['AC_std']) ** 2 +
-                           (-df['AC'] / df['DC'] ** 2 * df['DC_std']) ** 2) ** 0.5
-        # 5. For m_ellip
-        # Assuming you have a separate std for ellip (as calculated above)
-        df['m_ellip_std'] = (df['ellip_std'] / (self.path_l * self.sample_c))
-        # 6. For gabs
-        # Partial derivatives
-        partial_IL = 2 * df['I_R'] / (df['I_L'] + df['I_R']) ** 2
-        partial_IR = -2 * df['I_L'] / (df['I_L'] + df['I_R']) ** 2
-        # Standard deviation for gabs
-        df['gabs_std'] = ((partial_IL * df['I_L_std']) ** 2 + (partial_IR * df['I_R_std']) ** 2) ** 0.5
+
+        df['ellip_std'] = 32.982 * delta_A_std
+
+        df['m_ellip_std'] = 3298 * delta_E_std
+
+        df['gabs_std'] = ((1 / df['DC'] * df['AC_std']) ** 2 +
+                          (-df['AC'] / df['DC'] ** 2 * df['DC_std']) ** 2) ** 0.5
+
+        df['CD_std'] = delta_A_std
 
         return df
+
+
 
     def save_spec(self, dfspec, filename, savefig=True):
         dir_path = ".\\data\\"
@@ -1259,12 +1343,6 @@ class Controller(QMainWindow, LogObject):
         if not b:
             self.gui.canvas.itemconfigure(self.gui.txt_PEM, text='off')
 
-    def set_phaseoffset(self, value):
-        if self.initialized:
-            self.lockin_daq_lock.acquire()
-            self.lockin_daq.set_phaseoffset(value)
-            self.lockin_daq_lock.release()
-
     def move_nm(self, nm, move_pem=True):
 
         self.log('')
@@ -1322,14 +1400,10 @@ class Controller(QMainWindow, LogObject):
             self.lockin_daq.set_PMT_voltage(volt, False)
             self.lockin_daq_lock.release()
 
-            self.update_PMT_voltage_edt(volt)
+            self.update_PMT_voltage_edt_signal.emit(volt)
         except Exception as e:
             self.log('Error in set_PMT_voltage: ' + str(e), True)
 
-    def rescue_pmt(self):
-        self.set_PMT_voltage(0.0)
-        self.log('Signal ({:.2f} V) higher than threshold ({:.2f} V)!! '
-                 'Setting PMT to 0 V'.format(self.max_volt, self.shutdown_threshold), True)
 
     def set_input_range(self, f):
         self.lockin_daq_lock.acquire()
@@ -1413,7 +1487,12 @@ class Controller(QMainWindow, LogObject):
                                 True)
                             self.abort_measurement()
                     if pmt_limit_reached:
-                        self.rescue_pmt()
+                        self.set_PMT_voltage(0.0)
+                        while np.isnan(self.max_volt):
+                            time.sleep(0.001)  # Wait for 1 ms
+                        message = f'Signal ({self.max_volt:.2f} V) higher than threshold ({self.shutdown_threshold:.2f} V)!! Setting PMT to 0 V'
+                        self.log(message, True)
+
                         if self.acquisition_running:
                             self.abort_measurement()
 
@@ -1522,6 +1601,7 @@ class Controller(QMainWindow, LogObject):
         self.log('Calibration aborted.')
 
 
+# noinspection PyUnresolvedReferences
 class PhaseOffsetCalibrationDialog(QDialog, VisaDevice):
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -1656,3 +1736,23 @@ class PhaseOffsetCalibrationDialog(QDialog, VisaDevice):
             self.controller.cal_stop_record()
         self.controller.cal_end_after_thread()
         super().close()
+
+
+class PIDController:
+    def __init__(self, kp, ki, kd, max_integral=40, min_integral=-40):
+        self.kp = kp
+        self.ki = ki
+        self.kd = kd
+        self.prev_error = 0
+        self.integral = 0
+        self.max_integral = max_integral
+        self.min_integral = min_integral
+
+    def update(self, setpoint, measured_value):
+        error = setpoint - measured_value
+        self.integral += error
+        self.integral = max(min(self.integral, self.max_integral), self.min_integral)  # Clamp the integral term
+        derivative = error - self.prev_error
+        output = self.kp * error + self.ki * self.integral + self.kd * derivative
+        self.prev_error = error
+        return output

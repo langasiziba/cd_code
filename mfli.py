@@ -48,8 +48,6 @@ class MFLI(VisaDevice):
     ac_theta_count = 0
 
     sqrt2 = np.sqrt(2)
-    no_path = False
-    no_wave = False
 
     def __init__(self, ID: str, log_name: str, log_queue: queue.Queue, logObject=None):
         super().__init__(logObject=logObject, log_name=log_name)
@@ -70,7 +68,8 @@ class MFLI(VisaDevice):
                                                self.props['apilevel'])
             self.daq.connectDevice(self.devID, self.props['connected'])
 
-            # Issue a warning and return False if the release version of the API used in the session (daq) does not have the same release version as the Data Server (that the API is connected to).
+            # Issue a warning and return False if the release version of the API used in the session (daq) does not
+            # have the same release version as the Data Server (that the API is connected to).
             zhinst.utils.utils.api_server_version_check(self.daq)
             return True
         except Exception as e:
@@ -108,7 +107,7 @@ class MFLI(VisaDevice):
 
             if ch1:
                 self.log('Channel 1...')
-                # Channel 1 (AC, CD) #TODO: test at 0 Hz
+                # Channel 1 (AC, CD)
                 self.daq.setInt(self.devPath + 'demods/0/adcselect', 0)
                 self.daq.setInt(self.devPath + 'extrefs/0/enable', 0)
                 self.daq.setDouble(self.devPath + 'demods/0/phaseshift', self.phaseoffset)
@@ -124,10 +123,10 @@ class MFLI(VisaDevice):
             if ch2:
                 self.log('Channel 2...')
                 # Channel 2 (ExtRef)
-                self.daq.setInt(self.devPath + 'demods/1/adcselect', 8)
+                #self.daq.setInt(self.devPath + 'demods/1/adcselect', 8)
                 self.daq.setInt(self.devPath + 'extrefs/0/enable', 1)
                 # deactivate data transfer
-                self.daq.setInt(self.devPath + 'demods/1/enable', 0)
+                #self.daq.setInt(self.devPath + 'demods/1/enable', 0)
 
             if daqm:
                 self.node_paths = [self.devPath + 'demods/0/sample']
