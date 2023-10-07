@@ -102,16 +102,6 @@ class Monoi(VisaDevice):
         # Sets the monochromator's wavelength to the specified value.
         return self.retry_query('{:.2f} GOTO'.format(nm))
 
-    # def scan_wavelengths(self, min_wavelength: float, max_wavelength: float, step: float):
-    #     # Scans the monochromator's wavelength from the minimum to the maximum value with a specified step.
-    #
-    #     wavelength = min_wavelength
-    #     while wavelength <= max_wavelength:
-    #         self.log("Setting wavelength to {:.2f} nm...".format(wavelength))
-    #         self.set_nm(wavelength)
-    #         # Do your measurements or operations here
-
-    #       wavelength += step
 
 
 class Monoii(VisaDevice):

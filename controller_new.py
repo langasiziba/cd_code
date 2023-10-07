@@ -29,6 +29,8 @@ from pem import PEM
 class Controller(QMainWindow, LogObject):
     # update_mono_edt_lbl_signal = pyqtSignal(float)
 
+    #--- start of initialization of variables ---
+
     version = '1.0.1'
 
     lowpass_filter_risetime = 0.6  # s, depends on the timeconstant of the low pass filter
@@ -110,6 +112,9 @@ class Controller(QMainWindow, LogObject):
     setpoint_signal = pyqtSignal()
     clicked_init = False
     clicked_solvent = False
+
+    # ---end of initialization of variables ---
+
 
     # ---Start of initialization/closing section---
 
@@ -231,7 +236,6 @@ class Controller(QMainWindow, LogObject):
                     r'AC-Blank-File = (.*)\n',
                     r'Phase offset = ([0-9\.]*) deg',
                     r'DC-Blank-File = (.*)\n',
-                    r'Base-Blank-File = (.*)\n',
                     r'Detector Correction File = (.*)\n',
                     r'Sample C = ([0-9\.]*) mol/l',
                     r'Path l = ([0-9\.]*) cm']
@@ -247,7 +251,6 @@ class Controller(QMainWindow, LogObject):
                 self.gui.edt_ac_blank,
                 self.gui.edt_phaseoffset,
                 self.gui.edt_dc_blank,
-                self.gui.edt_base,
                 self.gui.edt_det_corr,
                 self.gui.edt_samplec,
                 self.gui.edt_pathl]
@@ -442,6 +445,8 @@ class Controller(QMainWindow, LogObject):
         # After completing all the tasks, exit the application
         QCoreApplication.instance().quit()
 
+    # --- End of Initialization/closing section ---
+
     # --- Start of GUI section---
 
     def log_author_message(self):
@@ -484,7 +489,8 @@ class Controller(QMainWindow, LogObject):
         self.gui.edt_phaseoffset.textChanged.connect(lambda: self.edt_changed('phaseoffset'))
         self.gui.edt_phaseoffset.returnPressed.connect(self.enter_phaseoffset)
 
-        self.gui.cbx_range.currentIndexChanged.connect(self.change_cbx_range)
+        #TODO: Fix this error
+        # self.gui.cbx_range.currentIndexChanged.connect(self.change_cbx_range)
         self.gui.btn_autorange.clicked.connect(self.click_autorange)
 
         self.gui.btn_cal_phaseoffset.clicked.connect(self.calibrate)
@@ -748,7 +754,7 @@ class Controller(QMainWindow, LogObject):
             if self.spec_thread.is_alive():
                 QTimer.singleShot(self.spec_refresh_delay, self.update_spec)
 
-                # ----End of GUI section---
+    # ----End of GUI section---
 
     # ---Start of spectra acquisition section---
 
@@ -770,14 +776,12 @@ class Controller(QMainWindow, LogObject):
 
         ac_blank = self.gui.edt_ac_blank.text()
         dc_blank = self.gui.edt_dc_blank.text()
-        base_blank = self.gui.edt_dc_blank.text()
         det_corr = self.gui.edt_det_corr.text()
         filename = self.gui.edt_filename.text()
         reps = int(self.gui.edt_rep.text())
 
         ac_blank_exists = filename_exists_or_empty(ac_blank)
         dc_blank_exists = filename_exists_or_empty(dc_blank)
-        base_blank_exists = filename_exists_or_empty(base_blank)
         det_corr_exists = filename_exists_or_empty(det_corr)
 
         if not check_illegal_chars(filename):
@@ -788,8 +792,7 @@ class Controller(QMainWindow, LogObject):
                     s = '_1'
                 filename_exists = filename_exists_or_empty(filename + s)
 
-                error = not ac_blank_exists or not dc_blank_exists or not det_corr_exists or filename_exists or not \
-                    base_blank_exists
+                error = not ac_blank_exists or not dc_blank_exists or not det_corr_exists or filename_exists
 
                 if not error:
                     self.stop_spec_trigger[0] = False
@@ -805,7 +808,6 @@ class Controller(QMainWindow, LogObject):
                         filename,
                         ac_blank,
                         dc_blank,
-                        base_blank,
                         det_corr,
                         self.gui.var_pem_off.isChecked()))
 
@@ -817,8 +819,6 @@ class Controller(QMainWindow, LogObject):
                         self.log('Error: AC-blank file does not exist!', True)
                     if not dc_blank_exists:
                         self.log('Error: DC-blank file does not exist!', True)
-                    if not base_blank_exists:
-                        self.log('Error: Base reading blank file does not exist!', True)
                     if not det_corr_exists:
                         self.log('Error: Detector correction file does not exist!', True)
                     if filename_exists:
@@ -830,7 +830,7 @@ class Controller(QMainWindow, LogObject):
 
     # will be executed in separate thread
     def record_spec(self, start_nm: float, end_nm: float, step: float, dwell_time: float, reps: int, filename: str,
-                    ac_blank: str, dc_blank: str, base_blank: str, det_corr: str, pem_off: int):
+                    ac_blank: str, dc_blank: str, det_corr: str, pem_off: int):
 
         global data
 
@@ -863,7 +863,7 @@ class Controller(QMainWindow, LogObject):
                                   [],  # gabs
                                   []])  # ellips
 
-        correction = ac_blank != '' or dc_blank != '' or det_corr != '' or base_blank != ''
+        correction = ac_blank != '' or dc_blank != '' or det_corr != ''
 
         if start_nm > end_nm:
             inc = -step
@@ -966,7 +966,7 @@ class Controller(QMainWindow, LogObject):
                     CD = delta_A
 
                     # Add the calculated values to their respective rows in curr_spec
-                    self.curr_spec[5][-1] = AC
+                    self.curr_spec[5][-1] = CD
                     self.curr_spec[7][-1] = I_L
                     self.curr_spec[9][-1] = I_R
                     self.curr_spec[15][-1] = ellip
@@ -1020,7 +1020,7 @@ class Controller(QMainWindow, LogObject):
             self.save_spec(dfcurr_spec, filename + index_str)
 
             if correction:
-                dfcurr_spec_corr = self.apply_corr(dfcurr_spec, ac_blank, dc_blank, base_blank, det_corr)
+                dfcurr_spec_corr = self.apply_corr(dfcurr_spec, ac_blank, dc_blank, det_corr)
                 self.save_spec(dfcurr_spec_corr, filename + index_str + '_corr', False)
 
             dfall_spectra[i] = dfcurr_spec
@@ -1036,7 +1036,7 @@ class Controller(QMainWindow, LogObject):
             self.save_spec(dfavg_spec, filename + '_avg', False)
 
             if correction:
-                dfavg_spec_corr = self.apply_corr(dfavg_spec, ac_blank, dc_blank, base_blank, det_corr)
+                dfavg_spec_corr = self.apply_corr(dfavg_spec, ac_blank, dc_blank, det_corr)
                 self.save_spec(dfavg_spec_corr, filename + '_avg_corr', False)
 
         self.log('')
@@ -1080,235 +1080,6 @@ class Controller(QMainWindow, LogObject):
                 self.avg_spec[5][index[0]] = self.avg_spec[2][index[0]] / self.avg_spec[1][index[0]]
 
                 # converts a numpy array to a pandas DataFrame
-
-    def np_to_pd(self, spec):
-        df = pd.DataFrame(spec.T)
-        df.columns = ['WL', 'DC', 'DC_std', 'AC', 'AC_std', 'CD', 'CD_std', 'I_L', 'I_L_std', 'I_R', 'I_R_std', 'gabs',
-                      'gabs_std', 'm_ellip', 'm_ellip_std', 'ellip', 'ellip_std']
-        df = df.set_index('WL')
-        return df
-
-    def df_average_spectra(self, dfspectra):
-        self.log('')
-        self.log('Averaging...')
-        # create a copy of the Dataframe structure of a spectrum filled with zeros
-        dfavg = dfspectra[0].copy()
-        dfavg.iloc[:, :] = 0.0
-
-        count = len(dfspectra)
-        # The error of the averaged spectrum is estimated using Gaussian propagation of uncertainty
-        for i in range(0, count):
-            dfavg['DC'] = dfavg['DC'] + dfspectra[i]['DC'] / count
-            dfavg['DC_std'] = dfavg['DC_std'] + (dfspectra[i]['DC_std'] / count) ** 2
-            dfavg['AC'] = dfavg['AC'] + dfspectra[i]['AC'] / count
-            dfavg['AC_std'] = dfavg['AC_std'] + (dfspectra[i]['AC_std'] / count) ** 2
-            dfavg['CD'] = dfavg['CD'] + dfspectra[i]['CD'] / count
-            dfavg['CD_std'] = dfavg['CD_std'] + (dfspectra[i]['CD_std'] / count) ** 2
-            dfavg['m_ellip'] = dfavg['m_ellip'] + dfspectra[i]['m_ellip'] / count
-            dfavg['m_ellip_std'] = dfavg['m_ellip_std'] + (dfspectra[i]['m_ellip_std'] / count) ** 2
-            dfavg['ellip'] = dfavg['ellip'] + dfspectra[i]['ellip'] / count
-            dfavg['ellip_std'] = dfavg['ellip_std'] + (dfspectra[i]['ellip_std'] / count) ** 2
-        dfavg['AC_std'] = dfavg['AC_std'] ** (0.5)
-        dfavg['DC_std'] = dfavg['DC_std'] ** (0.5)
-        dfavg['CD_std'] = dfavg['CD_std'] ** (0.5)
-        dfavg['m_ellip_std'] = dfavg['m_ellip_std'] ** (0.5)
-        dfavg['ellip_std'] = dfavg['ellip_std'] ** (0.5)
-
-        dfavg = self.calc_cd(dfavg)
-
-        return dfavg
-
-    def apply_corr(self, dfspec: pd.DataFrame, ac_blank: str, dc_blank: str, base_blank: str, det_corr: str):
-
-        # Gives True if wavelength region is suitable
-        def is_suitable(df_corr: pd.DataFrame, check_index: bool) -> bool:
-            first_WL_spec = dfspec.index[0]
-            last_WL_spec = dfspec.index[-1]
-
-            first_WL_corr = df_corr.index[0]
-            last_WL_corr = df_corr.index[-1]
-
-            # Check if the wavelength region in dfspec is covered by df_det_corr
-            WL_region_ok = min(first_WL_spec, last_WL_spec) >= min(first_WL_corr, last_WL_corr) and \
-                           max(first_WL_spec, last_WL_spec) <= max(first_WL_corr, last_WL_corr)
-            # Check if the measured wavelength values are available in the correction file (for AC and DC without
-            # interpolation)
-            values_ok = not check_index or dfspec.index.isin(df_corr.index).all()
-
-            return WL_region_ok and values_ok
-
-        # Interpolate the detector correction values to match the measured wavelength values
-        def interpolate_detcorr():
-            # Create a copy of the measured wavelengths and fill it with NaNs
-            dfspec_nan = pd.DataFrame()
-            dfspec_nan['nan'] = dfspec['AC'].copy()
-            dfspec_nan.iloc[:, 0] = float('NaN')
-
-            nonlocal df_det_corr
-            # Add the measured wavelengths to the correction data, missing values in the correction data will be set
-            # to NaN
-            df_det_corr = pd.concat([df_det_corr, dfspec_nan], axis=1).drop('nan', axis=1)
-            # Interpolate missing values in the correction data
-            df_det_corr = df_det_corr.interpolate(method='index')
-            # Limit WL values of correction data to measured wavelengths
-            df_det_corr = df_det_corr.filter(items=dfspec_nan.index, axis=0)
-
-        self.log('')
-        self.log('Baseline correction...')
-
-        # Correction for detector sensitivity
-        # Todo global data path
-        if det_corr != '':
-            self.log('Detector sensitivity correction with {}'.format(".\\data\\" + det_corr + ".csv"))
-            df_det_corr = pd.read_csv(filepath_or_buffer=".\\data\\" + det_corr + ".csv", sep=',', index_col='WL')
-
-            if is_suitable(df_det_corr, False):
-                interpolate_detcorr()
-                dfspec['DC'] = dfspec['DC'] / df_det_corr.iloc[:, 0]
-                dfspec['DC_std'] = dfspec['DC_std'] / df_det_corr.iloc[:, 0]
-                dfspec['AC'] = dfspec['AC'] / df_det_corr.iloc[:, 0]
-                dfspec['AC_std'] = dfspec['AC_std'] / df_det_corr.iloc[:, 0]
-            else:
-                self.log('Detector correction file does not cover the measured wavelength range!', True)
-
-        # AC baseline correction
-        if ac_blank != '':
-            self.log('AC blank correction with {}'.format(".\\data\\" + ac_blank + ".csv"))
-            df_ac_blank = pd.read_csv(filepath_or_buffer=".\\data\\" + ac_blank + ".csv", sep=',', index_col='WL')
-
-            if is_suitable(df_ac_blank, True):
-                dfspec['AC'] = dfspec['AC'] - df_ac_blank['AC']
-                dfspec['AC_std'] = ((dfspec['AC_std'] / 2) ** 2 + (df_ac_blank['AC_std'] / 2) ** 2) ** 0.5
-            else:
-                self.log('AC blank correction file does not contain the measured wavelengths!', True)
-
-        # DC baseline correction
-        if dc_blank != '':
-            self.log('DC blank correction with {}'.format(".\\data\\" + dc_blank + ".csv"))
-            df_dc_blank = pd.read_csv(filepath_or_buffer=".\\data\\" + dc_blank + ".csv", sep=',', index_col='WL')
-
-            if is_suitable(df_dc_blank, True):
-                dfspec['DC'] = dfspec['DC'] - df_dc_blank['DC']
-                dfspec['DC_std'] = ((dfspec['DC_std'] / 2) ** 2 + (df_dc_blank['DC_std'] / 2) ** 2) ** 0.5
-            else:
-                self.log('DC blank correction file does not contain the measured wavelengths!', True)
-
-        if base_blank != '':
-            self.log('AC blank correction with {}'.format(".\\data\\" + base_blank + ".csv"))
-            df_base_blank = pd.read_csv(filepath_or_buffer=".\\data\\" + base_blank + ".csv", sep=',',
-                                        index_col='WL')
-
-            if is_suitable(df_base_blank, True):
-                dfspec['AC'] = dfspec['AC'] - df_base_blank['AC']
-                dfspec['AC_std'] = ((dfspec['AC_std'] / 2) ** 2 + (df_base_blank['AC_std'] / 2) ** 2) ** 0.5
-                dfspec['DC'] = dfspec['DC'] - df_base_blank['DC']
-                dfspec['DC_std'] = ((dfspec['DC_std'] / 2) ** 2 + (df_base_blank['DC_std'] / 2) ** 2) ** 0.5
-            else:
-                self.log('Base reading blank correction file does not contain the measured wavelengths!', True)
-
-        # If there are wavelength values in the blankfiles that are not in dfspec this will give NaN values
-        # Drop all rows that contain NaN values
-        # The user must make sure that the blank files contain the correct values for the measurement
-        dfspec = dfspec.dropna(axis=0)
-
-        dfspec = self.calc_cd(dfspec)
-        return dfspec
-
-    def calc_cd(self, df):
-        # Primary Calculations
-        delta_A = df['AC'] / (2.303 * df['DC'])
-        delta_E = delta_A / (self.path_l * self.sample_c)
-        df['I_L'] = df['AC'] + df['DC']
-        df['I_R'] = df['DC'] - df['AC']
-        df['ellip'] = 32.982 * delta_A
-        df['m_ellip'] = 3298 * delta_E
-        df['gabs'] = df['AC'] / df['DC']
-        df['CD'] = df['delta_A']
-
-        # Gaussian error progression
-        delta_A_std = ((1 / (2.303 * df['DC']) * df['AC_std']) ** 2 +
-                             (-df['AC'] / (2.303 * df['DC'] ** 2) * df['DC_std']) ** 2) ** 0.5
-
-        delta_E_std = delta_A_std / (self.path_l * self.sample_c)
-
-        df['I_L_std'] = (df['AC_std'] ** 2 + df['DC_std'] ** 2) ** 0.5
-
-        df['I_R_std'] = (df['AC_std'] ** 2 + df['DC_std'] ** 2) ** 0.5
-
-        df['ellip_std'] = 32.982 * delta_A_std
-
-        df['m_ellip_std'] = 3298 * delta_E_std
-
-        df['gabs_std'] = ((1 / df['DC'] * df['AC_std']) ** 2 +
-                          (-df['AC'] / df['DC'] ** 2 * df['DC_std']) ** 2) ** 0.5
-
-        df['CD_std'] = delta_A_std
-
-        return df
-
-
-
-    def save_spec(self, dfspec, filename, savefig=True):
-        dir_path = ".\\data\\"
-
-        # Check if the directory exists, if not, create it
-        if not os.path.exists(dir_path):
-            os.makedirs(dir_path)
-
-        dfspec.to_csv(dir_path + filename + '.csv', index=True)
-        self.log('Data saved as: {}'.format(dir_path + filename + '.csv'))
-        self.save_params(dir_path + filename)
-
-        if savefig:
-            self.save_combined_graphs(dir_path + filename)
-            self.log('Figure saved as: {}'.format(dir_path + filename + '.png'))
-
-    def save_combined_graphs(self, filename):
-        # Create a new figure with 2x2 subplots
-        combined_fig, axs = plt.subplots(2, 2, figsize=(14, 11))
-
-        # List all your figures and their respective axes
-        figures = [self.gui.gabs_fig, self.gui.cd_fig, self.gui.ld_fig, self.gui.ellips_fig]
-        axes = [self.gui.gabs_ax, self.gui.cd_ax, self.gui.ld_ax, self.gui.ellips_ax]
-
-        for idx, (fig, ax) in enumerate(zip(figures, axes)):
-            combined_ax = axs[idx // 2, idx % 2]
-
-            # Copy content from the original axis to the new combined axis
-            for line in ax.get_lines():
-                combined_ax.plot(line.get_xdata(), line.get_ydata(), color=line.get_color())
-
-            # You can also copy over any other elements such as legends, titles, etc.
-
-        combined_fig.tight_layout()
-        combined_fig.savefig(filename + '.png')
-        plt.close(combined_fig)
-
-    def save_params(self, filename):
-        with open(filename + '_params.txt', 'w') as f:
-            f.write('Spectra Name = {}\n'.format(self.gui.edt_filename.text()))
-            f.write('Time = {}\n\n'.format(time.asctime(time.localtime(time.time()))))
-            f.write('Setup parameters\n')
-            f.write('Start WL = {} nm\n'.format(self.gui.edt_start.text()))
-            f.write('End WL = {} nm\n'.format(self.gui.edt_end.text()))
-            f.write('Step = {} nm\n'.format(self.gui.edt_step.text()))
-            f.write('Dwell time = {} s\n'.format(self.gui.edt_dwell.text()))
-            f.write('Repetitions = {}\n'.format(self.gui.edt_rep.text()))
-            f.write('Comment = {}\n'.format(self.gui.edt_comment.toPlainText()))
-            f.write('AC-Blank-File = {}\n'.format(self.gui.edt_ac_blank.text()))
-            f.write('DC-Blank-File = {}\n'.format(self.gui.edt_dc_blank.text()))
-            f.write('Base-Blank-File = {}\n'.format(self.gui.edt_base.text()))
-            f.write('PEM off = {:d}\n'.format(self.gui.var_pem_off.isChecked()))
-            f.write('Detector Correction File = {}\n'.format(self.gui.edt_det_corr.text()))
-            f.write('PMT voltage = {} V\n'.format(self.gui.edt_pmt.text()))
-            f.write('PMT gain = {}\n'.format(self.gui.edt_gain.text()))
-            f.write('Input range = {}\n'.format(self.gui.cbx_range.currentText()))
-            f.write('Phase offset = {} deg\n'.format(self.gui.edt_phaseoffset.text()))
-            f.write('Sample C = {} mol/l\n'.format(self.gui.edt_samplec.text()))
-            f.write('Path l = {} cm\n'.format(self.gui.edt_pathl.text()))
-
-        self.log('Parameters saved as: {}'.format(".\\data\\" + filename + '_params.txt'))
-
     def abort_measurement(self):
         self.log('')
         self.log('>>Aborting measurement<<')
@@ -1422,7 +1193,224 @@ class Controller(QMainWindow, LogObject):
         self.update_phaseoffset_edt(f)
         self.lockin_daq_lock.release()
 
-        # ---control functions end---
+    # --- data acquisition end ---
+
+    # --- Data processing starte ---
+    def np_to_pd(self, spec):
+        df = pd.DataFrame(spec.T)
+        df.columns = ['WL', 'DC', 'DC_std', 'AC', 'AC_std', 'CD', 'CD_std', 'I_L', 'I_L_std', 'I_R', 'I_R_std', 'gabs',
+                      'gabs_std', 'm_ellip', 'm_ellip_std', 'ellip', 'ellip_std']
+        df = df.set_index('WL')
+        return df
+
+    def df_average_spectra(self, dfspectra):
+        self.log('')
+        self.log('Averaging...')
+        # create a copy of the Dataframe structure of a spectrum filled with zeros
+        dfavg = dfspectra[0].copy()
+        dfavg.iloc[:, :] = 0.0
+
+        count = len(dfspectra)
+        # The error of the averaged spectrum is estimated using Gaussian propagation of uncertainty
+        for i in range(0, count):
+            dfavg['DC'] = dfavg['DC'] + dfspectra[i]['DC'] / count
+            dfavg['DC_std'] = dfavg['DC_std'] + (dfspectra[i]['DC_std'] / count) ** 2
+            dfavg['AC'] = dfavg['AC'] + dfspectra[i]['AC'] / count
+            dfavg['AC_std'] = dfavg['AC_std'] + (dfspectra[i]['AC_std'] / count) ** 2
+            dfavg['CD'] = dfavg['CD'] + dfspectra[i]['CD'] / count
+            dfavg['CD_std'] = dfavg['CD_std'] + (dfspectra[i]['CD_std'] / count) ** 2
+            dfavg['m_ellip'] = dfavg['m_ellip'] + dfspectra[i]['m_ellip'] / count
+            dfavg['m_ellip_std'] = dfavg['m_ellip_std'] + (dfspectra[i]['m_ellip_std'] / count) ** 2
+            dfavg['ellip'] = dfavg['ellip'] + dfspectra[i]['ellip'] / count
+            dfavg['ellip_std'] = dfavg['ellip_std'] + (dfspectra[i]['ellip_std'] / count) ** 2
+        dfavg['AC_std'] = dfavg['AC_std'] ** (0.5)
+        dfavg['DC_std'] = dfavg['DC_std'] ** (0.5)
+        dfavg['CD_std'] = dfavg['CD_std'] ** (0.5)
+        dfavg['m_ellip_std'] = dfavg['m_ellip_std'] ** (0.5)
+        dfavg['ellip_std'] = dfavg['ellip_std'] ** (0.5)
+
+        dfavg = self.calc_cd(dfavg)
+
+        return dfavg
+
+    def apply_corr(self, dfspec: pd.DataFrame, ac_blank: str, dc_blank: str, det_corr: str):
+
+        # Gives True if wavelength region is suitable
+        def is_suitable(df_corr: pd.DataFrame, check_index: bool) -> bool:
+            first_WL_spec = dfspec.index[0]
+            last_WL_spec = dfspec.index[-1]
+
+            first_WL_corr = df_corr.index[0]
+            last_WL_corr = df_corr.index[-1]
+
+            # Check if the wavelength region in dfspec is covered by df_det_corr
+            WL_region_ok = min(first_WL_spec, last_WL_spec) >= min(first_WL_corr, last_WL_corr) and \
+                           max(first_WL_spec, last_WL_spec) <= max(first_WL_corr, last_WL_corr)
+            # Check if the measured wavelength values are available in the correction file (for AC and DC without
+            # interpolation)
+            values_ok = not check_index or dfspec.index.isin(df_corr.index).all()
+
+            return WL_region_ok and values_ok
+
+        # Interpolate the detector correction values to match the measured wavelength values
+        def interpolate_detcorr():
+            # Create a copy of the measured wavelengths and fill it with NaNs
+            dfspec_nan = pd.DataFrame()
+            dfspec_nan['nan'] = dfspec['AC'].copy()
+            dfspec_nan.iloc[:, 0] = float('NaN')
+
+            nonlocal df_det_corr
+            # Add the measured wavelengths to the correction data, missing values in the correction data will be set
+            # to NaN
+            df_det_corr = pd.concat([df_det_corr, dfspec_nan], axis=1).drop('nan', axis=1)
+            # Interpolate missing values in the correction data
+            df_det_corr = df_det_corr.interpolate(method='index')
+            # Limit WL values of correction data to measured wavelengths
+            df_det_corr = df_det_corr.filter(items=dfspec_nan.index, axis=0)
+
+        self.log('')
+        self.log('Baseline correction...')
+
+        # Correction for detector sensitivity
+        # Todo global data path
+        if det_corr != '':
+            self.log('Detector sensitivity correction with {}'.format(".\\data\\" + det_corr + ".csv"))
+            df_det_corr = pd.read_csv(filepath_or_buffer=".\\data\\" + det_corr + ".csv", sep=',', index_col='WL')
+
+            if is_suitable(df_det_corr, False):
+                interpolate_detcorr()
+                dfspec['DC'] = dfspec['DC'] / df_det_corr.iloc[:, 0]
+                dfspec['DC_std'] = dfspec['DC_std'] / df_det_corr.iloc[:, 0]
+                dfspec['AC'] = dfspec['AC'] / df_det_corr.iloc[:, 0]
+                dfspec['AC_std'] = dfspec['AC_std'] / df_det_corr.iloc[:, 0]
+            else:
+                self.log('Detector correction file does not cover the measured wavelength range!', True)
+
+        # AC baseline correction
+        if ac_blank != '':
+            self.log('AC blank correction with {}'.format(".\\data\\" + ac_blank + ".csv"))
+            df_ac_blank = pd.read_csv(filepath_or_buffer=".\\data\\" + ac_blank + ".csv", sep=',', index_col='WL')
+
+            if is_suitable(df_ac_blank, True):
+                dfspec['AC'] = dfspec['AC'] - df_ac_blank['AC']
+                dfspec['AC_std'] = ((dfspec['AC_std'] / 2) ** 2 + (df_ac_blank['AC_std'] / 2) ** 2) ** 0.5
+            else:
+                self.log('AC blank correction file does not contain the measured wavelengths!', True)
+
+        # DC baseline correction
+        if dc_blank != '':
+            self.log('DC blank correction with {}'.format(".\\data\\" + dc_blank + ".csv"))
+            df_dc_blank = pd.read_csv(filepath_or_buffer=".\\data\\" + dc_blank + ".csv", sep=',', index_col='WL')
+
+            if is_suitable(df_dc_blank, True):
+                dfspec['DC'] = dfspec['DC'] - df_dc_blank['DC']
+                dfspec['DC_std'] = ((dfspec['DC_std'] / 2) ** 2 + (df_dc_blank['DC_std'] / 2) ** 2) ** 0.5
+            else:
+                self.log('DC blank correction file does not contain the measured wavelengths!', True)
+
+        # If there are wavelength values in the blankfiles that are not in dfspec this will give NaN values
+        # Drop all rows that contain NaN values
+        # The user must make sure that the blank files contain the correct values for the measurement
+        dfspec = dfspec.dropna(axis=0)
+
+        dfspec = self.calc_cd(dfspec)
+        return dfspec
+
+    def calc_cd(self, df):
+        # Primary Calculations
+        delta_A = df['AC'] / (2.303 * df['DC'])
+        delta_E = delta_A / (self.path_l * self.sample_c)
+        df['I_L'] = df['AC'] + df['DC']
+        df['I_R'] = df['DC'] - df['AC']
+        df['ellip'] = 32.982 * delta_A
+        df['m_ellip'] = 3298 * delta_E
+        df['gabs'] = df['AC'] / df['DC']
+        df['CD'] = delta_A
+
+        # Gaussian error progression
+        delta_A_std = ((1 / (2.303 * df['DC']) * df['AC_std']) ** 2 +
+                             (-df['AC'] / (2.303 * df['DC'] ** 2) * df['DC_std']) ** 2) ** 0.5
+
+        delta_E_std = delta_A_std / (self.path_l * self.sample_c)
+
+        df['I_L_std'] = (df['AC_std'] ** 2 + df['DC_std'] ** 2) ** 0.5
+
+        df['I_R_std'] = (df['AC_std'] ** 2 + df['DC_std'] ** 2) ** 0.5
+
+        df['ellip_std'] = 32.982 * delta_A_std
+
+        df['m_ellip_std'] = 3298 * delta_E_std
+
+        df['gabs_std'] = ((1 / df['DC'] * df['AC_std']) ** 2 +
+                          (-df['AC'] / df['DC'] ** 2 * df['DC_std']) ** 2) ** 0.5
+
+        df['CD_std'] = delta_A_std
+
+        return df
+
+
+
+    def save_spec(self, dfspec, filename, savefig=True):
+        dir_path = ".\\data\\"
+
+        # Check if the directory exists, if not, create it
+        if not os.path.exists(dir_path):
+            os.makedirs(dir_path)
+
+        dfspec.to_csv(dir_path + filename + '.csv', index=True)
+        self.log('Data saved as: {}'.format(dir_path + filename + '.csv'))
+        self.save_params(dir_path + filename)
+
+        if savefig:
+            self.save_combined_graphs(dir_path + filename)
+            self.log('Figure saved as: {}'.format(dir_path + filename + '.png'))
+
+    def save_combined_graphs(self, filename):
+        # Create a new figure with 2x2 subplots
+        combined_fig, axs = plt.subplots(2, 2, figsize=(14, 11))
+
+        # List all your figures and their respective axes
+        figures = [self.gui.gabs_fig, self.gui.cd_fig, self.gui.ld_fig, self.gui.ellips_fig]
+        axes = [self.gui.gabs_ax, self.gui.cd_ax, self.gui.ld_ax, self.gui.ellips_ax]
+
+        for idx, (fig, ax) in enumerate(zip(figures, axes)):
+            combined_ax = axs[idx // 2, idx % 2]
+
+            # Copy content from the original axis to the new combined axis
+            for line in ax.get_lines():
+                combined_ax.plot(line.get_xdata(), line.get_ydata(), color=line.get_color())
+
+            # You can also copy over any other elements such as legends, titles, etc.
+
+        combined_fig.tight_layout()
+        combined_fig.savefig(filename + '.png')
+        plt.close(combined_fig)
+
+    def save_params(self, filename):
+        with open(filename + '_params.txt', 'w') as f:
+            f.write('Spectra Name = {}\n'.format(self.gui.edt_filename.text()))
+            f.write('Time = {}\n\n'.format(time.asctime(time.localtime(time.time()))))
+            f.write('Setup parameters\n')
+            f.write('Start WL = {} nm\n'.format(self.gui.edt_start.text()))
+            f.write('End WL = {} nm\n'.format(self.gui.edt_end.text()))
+            f.write('Step = {} nm\n'.format(self.gui.edt_step.text()))
+            f.write('Dwell time = {} s\n'.format(self.gui.edt_dwell.text()))
+            f.write('Repetitions = {}\n'.format(self.gui.edt_rep.text()))
+            f.write('Comment = {}\n'.format(self.gui.edt_comment.toPlainText()))
+            f.write('AC-Blank-File = {}\n'.format(self.gui.edt_ac_blank.text()))
+            f.write('DC-Blank-File = {}\n'.format(self.gui.edt_dc_blank.text()))
+            f.write('PEM off = {:d}\n'.format(self.gui.var_pem_off.isChecked()))
+            f.write('Detector Correction File = {}\n'.format(self.gui.edt_det_corr.text()))
+            f.write('PMT voltage = {} V\n'.format(self.gui.edt_pmt.text()))
+            f.write('PMT gain = {}\n'.format(self.gui.edt_gain.text()))
+            f.write('Input range = {}\n'.format(self.gui.cbx_range.currentText()))
+            f.write('Phase offset = {} deg\n'.format(self.gui.edt_phaseoffset.text()))
+            f.write('Sample C = {} mol/l\n'.format(self.gui.edt_samplec.text()))
+            f.write('Path l = {} cm\n'.format(self.gui.edt_pathl.text()))
+
+        self.log('Parameters saved as: {}'.format(".\\data\\" + filename + '_params.txt'))
+
+    # ---data processing end---
 
     # ---oscilloscope section start---
 
@@ -1533,6 +1521,7 @@ class Controller(QMainWindow, LogObject):
     def cal_record_thread(self, positive):
         self.log('Thread started...')
         self.lockin_daq_lock.acquire()
+
         avg = self.lockin_daq.read_ac_theta(self.stop_cal_trigger)
         self.lockin_daq_lock.release()
 

@@ -1,11 +1,11 @@
-Spectra Name = demo1
-Time = Thu Oct  5 16:12:02 2023
+Spectra Name = demo
+Time = Fri Aug 25 11:35:35 2023
 
 Setup parameters
 Start WL = 400 nm
-End WL = 700 nm
-Step = 5 nm
-Dwell time = 2 s
+End WL = 650 nm
+Step = 1 nm
+Dwell time = 1 s
 Repetitions = 1
 Comment = 
 AC-Blank-File = 

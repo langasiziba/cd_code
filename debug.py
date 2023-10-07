@@ -48,6 +48,7 @@ class LogObject(QObject):
     def log_answer(self, s: str):
         self.log('>> {}'.format(s))
 
+
     def close(self):
         self.log('Closing logger...')
         self.initialized = False

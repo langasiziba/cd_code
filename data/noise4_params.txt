@@ -1,20 +1,21 @@
-Spectra Name = demo1
-Time = Thu Oct  5 16:12:02 2023
+Spectra Name = noise4
+Time = Wed Aug 23 17:24:15 2023
 
 Setup parameters
 Start WL = 400 nm
-End WL = 700 nm
-Step = 5 nm
-Dwell time = 2 s
+End WL = 425 nm
+Step = 0.5 nm
+Dwell time = 0.5 s
 Repetitions = 1
 Comment = 
 AC-Blank-File = 
 DC-Blank-File = 
+Base-Blank-File = 
 PEM off = 0
 Detector Correction File = 
-PMT voltage = 0.000 V
-PMT gain = 0.003
-Input range = 3.000
+PMT voltage = 0.150 V
+PMT gain = 0.019
+Input range = 0.003
 Phase offset = 0.000 deg
 Sample C = 1 mol/l
 Path l = 1 cm

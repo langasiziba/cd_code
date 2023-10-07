@@ -1,5 +1,5 @@
 Spectra Name = demo1
-Time = Thu Oct  5 16:12:02 2023
+Time = Fri Aug 25 11:38:35 2023
 
 Setup parameters
 Start WL = 400 nm
@@ -12,8 +12,8 @@ AC-Blank-File =
 DC-Blank-File = 
 PEM off = 0
 Detector Correction File = 
-PMT voltage = 0.000 V
-PMT gain = 0.003
+PMT voltage = 0.150 V
+PMT gain = 0.019
 Input range = 3.000
 Phase offset = 0.000 deg
 Sample C = 1 mol/l

@@ -340,6 +340,7 @@ class Ui_MainWindow(QMainWindow):
         self.cbx_range.addItem("0.200")
         self.cbx_range.addItem("1.000")
         self.cbx_range.addItem("3.000")
+        #self.cbx_range.currentIndexChanged
 
         self.edt_gain = QLineEdit(self.signaltuning_group)
         self.edt_gain.setObjectName(u"edt_gain")
@@ -400,14 +401,9 @@ class Ui_MainWindow(QMainWindow):
         self.spectrasetup_group.setAutoFillBackground(False)
         self.spectrasetup_group.setStyleSheet(u"background-color: rgb(195, 235, 255)")
         self.spectrasetup_group.setEnabled(False)
-
-        self.edt_base = QLineEdit(self.spectrasetup_group)
-        self.edt_base.setObjectName(u"edt_base")
-        self.edt_base.setGeometry(QRect(140, 30, 155, 21))
-        self.edt_base.setStyleSheet(u"background-color: rgb(255, 255, 255)")
         self.label_39 = QLabel(self.spectrasetup_group)
         self.label_39.setObjectName(u"label_39")
-        self.label_39.setGeometry(QRect(20, 30, 111, 16))
+        self.label_39.setGeometry(QRect(20, 30, 200, 50))
         self.label_39.setFont(font3)
         self.edt_start = QLineEdit(self.spectrasetup_group)
         self.edt_start.setObjectName(u"edt_start")
@@ -723,7 +719,7 @@ class Ui_MainWindow(QMainWindow):
         self.label_12.setText(QCoreApplication.translate("MainWindow", u"Approx gain :", None))
         self.label_13.setText(QCoreApplication.translate("MainWindow", u"Wavelength:", None))
         self.label_15.setText(QCoreApplication.translate("MainWindow", u"Range :", None))
-        self.label_39.setText(QCoreApplication.translate("MainWindow", u"Base reading:", None))
+        self.label_39.setText(QCoreApplication.translate("MainWindow", u"Fill in all *required fields", None))
         self.txt_avgVolt.setText(QCoreApplication.translate("MainWindow", u"peak_voltage", None))
         self.txt_maxVolt.setText(QCoreApplication.translate("MainWindow", u"avg_voltage", None))
         self.btn_set_PMT.setText(QCoreApplication.translate("MainWindow", u"Set", None))
