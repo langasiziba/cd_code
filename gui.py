@@ -154,7 +154,7 @@ class Ui_MainWindow(QMainWindow):
 
     def setupUi(self, MainWindow):
         if not MainWindow.objectName():
-            MainWindow.setObjectName(u"MainWindow")
+            MainWindow.setObjectName(u"CDPLOT")
         MainWindow.resize(1480, 886)
         font = QFont()
         font.setFamily(u"Segoe UI Historic")

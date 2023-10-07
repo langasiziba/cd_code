@@ -1,0 +1,20 @@
+Spectra Name = demo01
+Time = Thu Oct  5 11:13:45 2023
+
+Setup parameters
+Start WL = 400 nm
+End WL = 700 nm
+Step = 5 nm
+Dwell time = 2 s
+Repetitions = 1
+Comment = This is a demo
+AC-Blank-File = 
+DC-Blank-File = 
+PEM off = 0
+Detector Correction File = 
+PMT voltage = 0.200 V
+PMT gain = 0.034
+Input range = 3.000
+Phase offset = 0.000 deg
+Sample C = 1 mol/l
+Path l = 1 cm
